@@ -13,7 +13,7 @@ const faqs = [
   ['How do you handle token limits?', 'We don\'t. We completely bypass that shit. We only inject the precise semantic triplets you need for the current thought. Your context window stays pristine.'],
   ['What if I want to turn off memory decay?', 'You can pin memories so they never decay. But trust me, you say a lot of useless shit. Let the biological algorithm do its goddamn job.'],
   ['Is there an API?', 'Obviously. We expose a REST API and an MCP server. Build whatever the fuck you want.'],
-  ['Who are you guys?', 'Just some chads who got so goddamn frustrated with the amnesia pandemic in AI that we built the fix ourselves. Stop asking questions and start building.']
+  ['Who are you guys?', 'Just some engineers who got so goddamn frustrated with the amnesia pandemic in AI that we built the fix ourselves. Stop asking questions and start building.']
 ]
 
 function Reveal({ children, className = '' }: { children: React.ReactNode; className?: string }) {
