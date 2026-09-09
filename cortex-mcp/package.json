@@ -1,0 +1,13 @@
+{
+  "name": "cortex-mcp",
+  "version": "1.0.0",
+  "description": "Cortex MCP Server to inject the Hive Mind into Cursor and Windsurf.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.1"
+  }
+}

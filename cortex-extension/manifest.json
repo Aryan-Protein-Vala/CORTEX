@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Cortex Gigabrain Injector",
+  "version": "1.0.0",
+  "description": "Injects the Cortex Hive Mind memory directly into ChatGPT and Claude.",
+  "permissions": [
+    "storage",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "http://localhost:3030/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*", "https://claude.ai/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_title": "Cortex Settings",
+    "default_popup": "popup.html"
+  }
+}
