@@ -21,11 +21,35 @@ function Reveal({ children, className = '' }: { children: React.ReactNode; class
 }
 
 function Graph({ active = 4 }: { active?: number }) {
+  const [activeNodes, setActiveNodes] = useState(active);
+  
+  useEffect(() => {
+    // Phase 9: Connect to the Rust Core WebSocket for live neural visualizer
+    const ws = new WebSocket("ws://localhost:3030/ws");
+    
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'WS_SYNAPSE_PULSE') {
+          // Pulse the graph visually
+          setActiveNodes(prev => Math.min(prev + 1, 8));
+        } else if (data.type === 'WS_DECAY') {
+          // Fade nodes visually
+          setActiveNodes(prev => Math.max(prev - 1, 0));
+        }
+      } catch (e) {
+        console.error("Neural canvas parsing error:", e);
+      }
+    };
+    
+    return () => ws.close();
+  }, []);
+
   const points = [[32,90],[100,45],[168,112],[240,46],[305,98],[370,38],[430,104],[492,55]]
   const edges = [[0,1],[1,2],[1,3],[2,3],[2,4],[3,5],[4,5],[4,6],[5,7],[6,7]]
   return <svg className="graph" viewBox="0 0 525 150" role="img" aria-label="Cortex memory graph visualization">
-    {edges.map(([a,b], i) => <path key={i} d={`M${points[a][0]} ${points[a][1]} Q ${(points[a][0]+points[b][0])/2} ${(points[a][1]+points[b][1])/2-25} ${points[b][0]} ${points[b][1]}`} className={i < active ? 'graph-path active' : 'graph-path'} style={{ animationDelay: `${i * 110}ms` }} />)}
-    {points.map(([x,y], i) => <circle key={i} cx={x} cy={y} r={i < active ? 5 : 3} className={i < active ? 'graph-node active' : 'graph-node'} style={{ animationDelay: `${i * 140}ms` }} />)}
+    {edges.map(([a,b], i) => <path key={i} d={`M${points[a][0]} ${points[a][1]} Q ${(points[a][0]+points[b][0])/2} ${(points[a][1]+points[b][1])/2-25} ${points[b][0]} ${points[b][1]}`} className={i < activeNodes ? 'graph-path active' : 'graph-path'} style={{ animationDelay: `${i * 110}ms` }} />)}
+    {points.map(([x,y], i) => <circle key={i} cx={x} cy={y} r={i < activeNodes ? 5 : 3} className={i < activeNodes ? 'graph-node active' : 'graph-node'} style={{ animationDelay: `${i * 140}ms` }} />)}
   </svg>
 }
 

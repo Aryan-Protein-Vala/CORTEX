@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package cortex.sync;
+
+service CortexCloud {
+  // Sync the local memory graph to the cloud instance
+  rpc SyncGraph (SyncRequest) returns (SyncResponse);
+}
+
+message SyncRequest {
+  string user_id = 1;
+  // A CRDT (Conflict-free Replicated Data Type) vector clock payload
+  bytes crdt_payload = 2; 
+  int64 timestamp = 3;
+}
+
+message SyncResponse {
+  bool success = 1;
+  int64 server_timestamp = 2;
+  // Any remote changes that need to be merged back into the local Qdrant/SurrealDB
+  bytes merge_payload = 3;
+}
