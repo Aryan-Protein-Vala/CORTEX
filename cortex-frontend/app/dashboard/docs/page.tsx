@@ -32,7 +32,7 @@ export default function DocsPage() {
           Integration is <em>easy.</em>
         </h1>
         <p className="lead" style={{ maxWidth: '600px', margin: '20px 0 30px' }}>
-          Everything you need to inject Cortex into your workflow. Don&apos;t overcomplicate it.
+          Official technical documentation and API specifications for the Cortex Memory Protocol.
         </p>
 
         <div style={{ display: 'flex', gap: '12px', borderBottom: '1px solid var(--border)', paddingBottom: '20px' }}>
@@ -59,14 +59,14 @@ export default function DocsPage() {
             <div>
               <p className="mono">THE ENGINE</p>
               <h3>Start Cortex Core</h3>
-              <p>This is the Rust backend. It&apos;s the brain. Without it, your AI is a vegetable.</p>
+              <p>Initialize the Rust backend. This handles all embedding, graph traversal, and Ebbinghaus decay math.</p>
               <CopyBlock code={`cd cortex-core\ncargo run`} />
             </div>
             <div className="step-art" style={{ opacity: 1, paddingLeft: '40px' }}>
               <div style={{ padding: '20px', border: '1px solid var(--border)', background: 'var(--surface)', font: '12px monospace' }}>
-                <span style={{ color: '#22c55e' }}>✔</span> Engine running on port 3030<br/>
-                <span style={{ color: '#22c55e' }}>✔</span> SurrealDB connected<br/>
-                <span style={{ color: '#22c55e' }}>✔</span> Qdrant vectors ready
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#22c55e', marginBottom: '8px' }}><Check size={14} /> <span>Engine running on port 3030</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#22c55e', marginBottom: '8px' }}><Check size={14} /> <span>SurrealDB connected</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#22c55e' }}><Check size={14} /> <span>Qdrant vectors ready</span></div>
               </div>
             </div>
           </div>
@@ -75,8 +75,8 @@ export default function DocsPage() {
             <div className="step-marker">02</div>
             <div>
               <p className="mono">CURSOR / WINDSURF</p>
-              <h3>Attach the MCP</h3>
-              <p>Give your IDE a permanent brain. Open your MCP settings (`~/.cursor/mcp.json`) and paste this config.</p>
+              <h3>Attach the MCP Server</h3>
+              <p>Give your IDE a permanent memory. Add Cortex to your MCP settings (`~/.cursor/mcp.json`).</p>
               <CopyBlock lang="json" code={`{
   "mcpServers": {
     "cortex": {
@@ -91,10 +91,10 @@ export default function DocsPage() {
             </div>
             <div className="step-art" style={{ opacity: 1, paddingLeft: '40px' }}>
               <div style={{ padding: '20px', border: '1px dashed var(--accent)', background: 'color-mix(in srgb, var(--accent) 5%, transparent)' }}>
-                <p style={{ margin: '0 0 10px', fontWeight: 'bold', color: 'var(--foreground)' }}>Cursor Superpowers Unlocked:</p>
+                <p style={{ margin: '0 0 10px', fontWeight: 'bold', color: 'var(--foreground)' }}>Cursor Capabilities:</p>
                 <ul style={{ margin: 0, paddingLeft: '20px', font: '12px monospace', color: 'var(--secondary)' }}>
-                  <li style={{ marginBottom: '8px' }}><code>fetch_cortex_memory</code> (Auto-reads your rules)</li>
-                  <li><code>store_cortex_memory</code> (Saves new facts forever)</li>
+                  <li style={{ marginBottom: '8px' }}><code>fetch_cortex_memory</code> (Context retrieval)</li>
+                  <li><code>store_cortex_memory</code> (Persist session facts)</li>
                 </ul>
               </div>
             </div>
@@ -104,8 +104,8 @@ export default function DocsPage() {
             <div className="step-marker">03</div>
             <div>
               <p className="mono">BROWSER EXTENSION</p>
-              <h3>Inject into ChatGPT</h3>
-              <p>Load the unpacked `cortex-extension` folder in Chrome. It invisibly intercepts prompts and injects your graph context.</p>
+              <h3>Inject into Web UIs</h3>
+              <p>Load the unpacked `cortex-extension` folder in Chrome. It intercepts DOM mutations in ChatGPT/Claude and injects memory context.</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginTop: '25px', font: '12px monospace', color: 'var(--secondary)' }}>
                 <span style={{ padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)' }}>Prompt</span>
                 <ArrowRight size={12} />

@@ -50,12 +50,12 @@ function Neuron({ data, onClick }: { data: NeuronData; onClick: (n: NeuronData) 
   const [hovered, setHovered] = useState(false)
 
   const color = data.locked ? '#f59e0b' : data.isGlobal ? '#a855f7' : data.retention < 0.35 ? '#475569' : '#06b6d4'
-  const opacity = data.locked ? 1.0 : Math.max(0.2, data.retention)
-  const scale = data.locked ? 0.35 : 0.15 + data.retention * 0.2
+  const opacity = data.locked ? 1.0 : Math.max(0.3, data.retention)
+  const scale = (data.locked ? 0.6 : 0.4 + data.retention * 0.3)
 
   useFrame((state) => {
     if (meshRef.current) {
-      meshRef.current.position.y = data.position[1] + Math.sin(state.clock.elapsedTime * 0.5 + data.position[0]) * 0.08
+      meshRef.current.position.y = data.position[1] + Math.sin(state.clock.elapsedTime * 0.5 + data.position[0]) * 0.15
     }
     if (glowRef.current) {
       glowRef.current.scale.setScalar(1 + Math.sin(state.clock.elapsedTime * 2) * 0.15)
@@ -97,9 +97,9 @@ function Neuron({ data, onClick }: { data: NeuronData; onClick: (n: NeuronData) 
 
       {/* Label */}
       <Text
-        position={[0, -(scale + 0.25), 0]}
-        fontSize={0.15}
-        color={hovered ? '#ffffff' : data.retention < 0.35 ? '#64748b' : '#e2e8f0'}
+        position={[0, -(scale + 0.35), 0]}
+        fontSize={0.25}
+        color={hovered ? 'var(--foreground)' : data.retention < 0.35 ? '#64748b' : 'var(--secondary)'}
         anchorX="center"
         anchorY="top"
         font="/fonts/inter.woff"
@@ -111,8 +111,8 @@ function Neuron({ data, onClick }: { data: NeuronData; onClick: (n: NeuronData) 
       {/* Retention tag on hover */}
       {hovered && (
         <Text
-          position={[0, -(scale + 0.45), 0]}
-          fontSize={0.1}
+          position={[0, -(scale + 0.7), 0]}
+          fontSize={0.15}
           color={color}
           anchorX="center"
           anchorY="top"
@@ -187,11 +187,9 @@ function Scene({ neurons, edges, onSelectNeuron }: { neurons: NeuronData[]; edge
 
   return (
     <>
-      <ambientLight intensity={0.3} />
-      <pointLight position={[5, 5, 5]} intensity={0.8} color="#ff6b4a" />
-      <pointLight position={[-5, -3, 3]} intensity={0.5} color="#06b6d4" />
-
-      <Stars radius={100} depth={50} count={2000} factor={3} saturation={0} fade speed={0.5} />
+      <ambientLight intensity={0.6} />
+      <pointLight position={[5, 5, 5]} intensity={1.2} color="#ff6b4a" />
+      <pointLight position={[-5, -3, 3]} intensity={0.8} color="#06b6d4" />
 
       {/* Edges */}
       {edges.map((edge, i) => {
@@ -232,7 +230,7 @@ export default function BrainPage() {
   const [edges] = useState<EdgeData[]>(DEMO_EDGES)
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 50 }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'var(--background)', zIndex: 50 }}>
       {/* The 3D Canvas — fills the entire screen */}
       <Canvas camera={{ position: [0, 2, 8], fov: 50 }} style={{ width: '100%', height: '100%' }}>
         <Scene neurons={neurons} edges={edges} onSelectNeuron={setSelectedNeuron} />
@@ -244,21 +242,21 @@ export default function BrainPage() {
         style={{
           position: 'absolute', top: 24, left: 24, zIndex: 60,
           display: 'flex', alignItems: 'center', gap: 8,
-          padding: '10px 18px', borderRadius: 10,
-          background: 'rgba(10,10,10,0.8)', backdropFilter: 'blur(12px)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          color: '#fff', font: '12px monospace', textDecoration: 'none',
-          transition: 'all .2s',
+          padding: '12px 20px', borderRadius: 8,
+          background: 'var(--surface)', backdropFilter: 'blur(12px)',
+          border: '1px solid var(--border)',
+          color: 'var(--foreground)', font: '12px monospace', textDecoration: 'none',
+          transition: 'all .2s', fontWeight: 'bold'
         }}
       >
-        <ArrowLeft size={14} /> Back to Dashboard
+        <ArrowLeft size={16} /> BACK TO DASHBOARD
       </Link>
 
       {/* Floating title */}
       <div style={{
         position: 'absolute', top: 24, right: 24, zIndex: 60,
         padding: '12px 18px', borderRadius: 4,
-        background: 'rgba(10,10,10,0.8)', backdropFilter: 'blur(12px)',
+        background: 'var(--surface)', backdropFilter: 'blur(12px)',
         border: '1px solid var(--border)',
         font: '11px monospace', color: 'var(--secondary)', letterSpacing: '.12em'
       }}>
@@ -271,7 +269,7 @@ export default function BrainPage() {
         <div style={{
           position: 'absolute', bottom: 32, left: 32, zIndex: 60,
           width: 340, padding: 24, borderRadius: 0,
-          background: 'rgba(10,10,10,0.9)', backdropFilter: 'blur(16px)',
+          background: 'var(--surface)', backdropFilter: 'blur(16px)',
           border: '1px solid var(--border)',
           color: 'var(--foreground)',
         }}>
@@ -317,7 +315,7 @@ export default function BrainPage() {
       <div style={{
         position: 'absolute', bottom: 32, right: 32, zIndex: 60,
         padding: '16px 20px', borderRadius: 0,
-        background: 'rgba(10,10,10,0.8)', backdropFilter: 'blur(12px)',
+        background: 'var(--surface)', backdropFilter: 'blur(12px)',
         border: '1px solid var(--border)',
         font: '10px monospace', color: 'var(--secondary)', letterSpacing: '.05em',
         display: 'flex', flexDirection: 'column', gap: 10,

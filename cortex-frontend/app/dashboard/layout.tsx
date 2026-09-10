@@ -86,32 +86,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         .dash-nav {
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 16px;
           flex: 1;
         }
         .dash-nav-item {
           display: flex;
           align-items: center;
           gap: 12px;
-          padding: 14px 16px;
+          height: 56px;
+          padding: 0 20px;
           border-radius: 12px;
           font-size: 14px;
-          font-weight: 600;
+          font-weight: 700;
           color: var(--secondary);
           text-decoration: none;
-          border: 1px solid transparent;
-          transition: all .2s;
+          background: transparent;
+          border: 1px solid var(--border);
+          transition: transform .2s, box-shadow .2s, background .2s, color .2s;
         }
         .dash-nav-item:hover {
           color: var(--foreground);
-          border-color: var(--border);
-          background: var(--muted);
-          transform: translateX(4px);
+          background: var(--surface);
+          transform: translateY(-2px);
+          box-shadow: 0 10px 25px rgba(0,0,0,0.05);
         }
         .dash-nav-item.active {
-          background: color-mix(in srgb, var(--accent) 8%, transparent);
-          border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-          color: var(--accent);
+          background: var(--accent);
+          border-color: var(--accent);
+          color: var(--accent-contrast);
+        }
+        .dash-nav-item.active:hover {
+          box-shadow: 0 10px 25px color-mix(in srgb, var(--accent) 24%, transparent);
         }
         .dash-sidebar-bottom {
           display: flex;
