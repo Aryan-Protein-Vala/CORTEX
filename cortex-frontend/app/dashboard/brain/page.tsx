@@ -3,7 +3,7 @@
 import { useRef, useMemo, useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { OrbitControls, Text, Float, Stars } from '@react-three/drei'
+import { OrbitControls, Html, Float, Stars } from '@react-three/drei'
 import * as THREE from 'three'
 import { ArrowLeft } from 'lucide-react'
 
@@ -96,28 +96,33 @@ function Neuron({ data, onClick }: { data: NeuronData; onClick: (n: NeuronData) 
       </mesh>
 
       {/* Label */}
-      <Text
-        position={[0, -(scale + 0.35), 0]}
-        fontSize={0.25}
-        color={hovered ? '#f59e0b' : data.retention < 0.35 ? '#94a3b8' : '#64748b'}
-        anchorX="center"
-        anchorY="top"
-        outlineWidth={0}
-      >
-        {data.label}
-      </Text>
+      <Html center position={[0, -(scale + 0.35), 0]} style={{ pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+        <div style={{
+          color: hovered ? 'var(--accent)' : data.retention < 0.35 ? 'var(--secondary)' : 'var(--foreground)',
+          fontFamily: 'monospace',
+          fontSize: '11px',
+          fontWeight: hovered ? 'bold' : 'normal',
+          textShadow: '0 2px 4px rgba(0,0,0,0.5)'
+        }}>
+          {data.label}
+        </div>
+      </Html>
 
       {/* Retention tag on hover */}
       {hovered && (
-        <Text
-          position={[0, -(scale + 0.7), 0]}
-          fontSize={0.15}
-          color={color}
-          anchorX="center"
-          anchorY="top"
-        >
-          {`R: ${(data.retention * 100).toFixed(0)}% ${data.locked ? '🔒 LOCKED' : '⚡ Ebbinghaus'}`}
-        </Text>
+        <Html center position={[0, -(scale + 0.7), 0]} style={{ pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+          <div style={{
+            color: color,
+            fontFamily: 'monospace',
+            fontSize: '10px',
+            background: 'var(--surface)',
+            padding: '2px 6px',
+            border: `1px solid ${color}`,
+            borderRadius: '4px'
+          }}>
+            {`R: ${(data.retention * 100).toFixed(0)}% ${data.locked ? '🔒 LOCKED' : '⚡ Ebbinghaus'}`}
+          </div>
+        </Html>
       )}
     </group>
   )
