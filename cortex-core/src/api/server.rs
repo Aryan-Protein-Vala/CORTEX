@@ -755,6 +755,18 @@ struct IngestRequest {
     /// tool so the model can confirm a write). Default false: fire-and-forget.
     #[serde(default)]
     wait: Option<bool>,
+    /// Floor for the impact of everything in this request (0..=10). Callers that
+    /// already know a fact is permanent (an explicit `remember(..., impact: 10)`)
+    /// must not have that downgraded by the extractor's guess. Never raises above
+    /// what the extractor itself decided.
+    #[serde(default)]
+    impact: Option<u8>,
+}
+
+impl IngestRequest {
+    fn impact_floor(&self) -> Option<u8> {
+        self.impact.map(|i| i.min(10))
+    }
 }
 
 async fn ingest_context(
@@ -820,10 +832,11 @@ async fn ingest_context(
 
     let job_for_task = job_id.clone();
     let wait = payload.wait.unwrap_or(false);
+    let impact_floor = payload.impact_floor();
     let handle = tokio::spawn(async move {
         let _permit = permit;
         set_job(&st, &job_for_task, JobState::Running, None, None);
-        let outcome = apply_transcript(&st, &transcript, &owner, &provenance).await;
+        let outcome = apply_transcript(&st, &transcript, &owner, &provenance, impact_floor).await;
         match outcome {
             Ok(report) => {
                 set_job(&st, &job_for_task, JobState::Done, Some(report), None);
@@ -927,6 +940,7 @@ async fn apply_transcript(
     transcript: &str,
     owner: &str,
     provenance: &str,
+    impact_floor: Option<u8>,
 ) -> Result<IngestReport, ApiError> {
     let mut warnings = Vec::new();
     let mut extractor = "heuristic".to_string();
@@ -966,6 +980,13 @@ async fn apply_transcript(
     let mut local_index: HashMap<String, MemoryNode> = HashMap::new();
     for triplet in triplets.into_iter() {
         let triplet = triplet.sanitized();
+        let triplet = match impact_floor {
+            Some(floor) if floor > triplet.impact => SemanticTriplet {
+                impact: floor,
+                ..triplet
+            },
+            _ => triplet,
+        };
         if !triplet.is_valid() || triplet.subject.chars().count() < 2 {
             rejected += 1;
             continue;
@@ -1098,8 +1119,14 @@ struct InjectRequest {
     text: String,
     #[serde(default)]
     source: Option<String>,
+    /// Accepted for symmetry with `/v1/ingest`; `/v1/inject` is always
+    /// synchronous, because SDK callers need the write confirmed before they
+    /// return. `wait` is therefore ignored rather than misleading.
     #[serde(default)]
+    #[allow(dead_code)]
     wait: Option<bool>,
+    #[serde(default)]
+    impact: Option<u8>,
 }
 
 async fn inject_uri_memory(
@@ -1110,13 +1137,15 @@ async fn inject_uri_memory(
         return Err(ApiError::bad_request("`text` must not be empty"));
     }
     let owner = normalize_owner(&payload.uri);
-    let report = apply_transcript(
-        &state,
-        &payload.text,
-        &owner,
-        &payload.source.unwrap_or_else(|| "sdk".to_string()),
-    )
-    .await?;
+    let provenance = payload
+        .source
+        .clone()
+        .unwrap_or_else(|| "sdk".to_string())
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .take(32)
+        .collect::<String>();
+    let report = apply_transcript(&state, &payload.text, &owner, &provenance, payload.impact.map(|i| i.min(10))).await?;
     let body = serde_json::json!({
         "success": true,
         "owner_uri": owner,
@@ -1219,7 +1248,7 @@ async fn flush_payload(state: &AppState, payload: crate::storage::session::Flush
     } else {
         payload.provenance
     };
-    apply_transcript(state, &transcript, &payload.owner_uri, &provenance).await
+    apply_transcript(state, &transcript, &payload.owner_uri, &provenance, None).await
 }
 
 #[derive(Deserialize)]
