@@ -1,6 +1,13 @@
-import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
+import AnalyticsGate from '../components/analytics'
 import './globals.css'
+
+/**
+ * A project whose pitch is "no telemetry" must not enable pageview analytics by
+ * accident: the marketing site loads Vercel Analytics only when this flag is set,
+ * and the privacy page documents whichever way a deployment is configured.
+ */
+const ANALYTICS_ENABLED = process.env.NEXT_PUBLIC_SITE_ANALYTICS === '1'
 
 /**
  * Metadata is derived, not decorative: `metadataBase` has to exist or every
@@ -74,7 +81,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         </a>
         <div id="main">{children}</div>
         <span id="top" />
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        {ANALYTICS_ENABLED && <AnalyticsGate />}
       </body>
     </html>
   )

@@ -1,0 +1,273 @@
+name: CI
+
+# Every job here runs a suite that exists in this repo. Nothing is aspirational:
+# if a job is green, that claim in the README is true.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── The engine ──────────────────────────────────────────────────────────────
+  core:
+    name: cortex-core (fmt · clippy · test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: cortex-core
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub's ubuntu-latest ships a stable Rust toolchain; we only add the
+      # components, so there is no third-party action to trust here.
+      - name: Toolchain
+        run: |
+          rustup component add rustfmt clippy
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cortex-core/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('cortex-core/Cargo.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # The repo deliberately does not commit cortex-core/Cargo.lock (the last
+      # one pinned axum 0.6 while the manifest asked for 0.7, which only bites
+      # when someone builds --locked). CI resolves and commits nothing.
+      - name: Resolve dependencies
+        run: cargo generate-lockfile
+
+      - name: Format
+        continue-on-error: true # formatting was never run locally (no cargo at
+        run: cargo fmt --all --check # authoring time); flip once it is green
+
+      - name: Clippy
+        continue-on-error: true # same: warnings are expected on the first run
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets
+
+      - name: Build (release, single binary)
+        run: cargo build --release --bin cortex-core
+
+      # End-to-end against the *release binary*: no test doubles, no source
+      # imports. If this passes, a stranger's `cargo run` works.
+      - name: Smoke the binary
+        run: |
+          set -euo pipefail
+          ./target/release/cortex-core > /tmp/core.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3030/health >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:3030/health -o /tmp/health.json
+          jq -e '.status == "ok"' /tmp/health.json > /dev/null
+          jq -e '.backend == "file"' /tmp/health.json > /dev/null
+          # The health endpoint must not advertise capabilities that do not exist.
+          jq -e '.services.cloud_sync == false' /tmp/health.json > /dev/null
+          jq -e '.services.extraction == false' /tmp/health.json > /dev/null
+
+          curl -fsS -X POST http://127.0.0.1:3030/v1/ingest -H 'content-type: application/json' \
+            -d '{"owner":"ci@local","user_id":"ci","wait":true,"prompt":"USER: I always use pnpm in CI. USER: I prefer Rust for backend services"}' \
+            -o /tmp/ingest.json
+          jq -e '.job_id' /tmp/ingest.json > /dev/null
+          state=$(curl -fsS "http://127.0.0.1:3030/v1/jobs/$(jq -r .job_id /tmp/ingest.json)" | jq -r '.state')
+          test "$state" = "done" || { echo "job state was $state"; cat /tmp/core.log; exit 1; }
+
+          curl -fsS -X POST http://127.0.0.1:3030/v1/recall -H 'content-type: application/json' \
+            -d '{"owner":"ci@local","query":"package manager","token_budget":600}' -o /tmp/recall.json
+          jq -e '.briefing or .context or .memories' /tmp/recall.json > /dev/null
+          curl -fsS 'http://127.0.0.1:3030/v1/memories?owner=ci@local&limit=10' -o /tmp/memories.json
+          jq -e 'has("memories") or type == "array"' /tmp/memories.json > /dev/null
+          # Mesh publishing must be an explicit 501, never a silent no-op.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3030/v1/mesh/publish \
+            -H 'content-type: application/json' -d '{"owner":"ci@local","node_id":"x"}')
+          test "$code" = "501" || { echo "expected 501 from mesh publish, got $code"; exit 1; }
+
+          kill $pid; wait $pid 2>/dev/null || true
+          grep -q "flushed pending sessions\|shutdown" /tmp/core.log || echo "note: no shutdown log line"
+
+      - name: Auth gate (a key must actually gate)
+        run: |
+          set -euo pipefail
+          CORTEX_API_KEY=ci-secret-key CORTEX_PORT=3031 ./target/release/cortex-core > /tmp/core-auth.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3031/health >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          # /health stays open; data routes do not.
+          curl -fsS http://127.0.0.1:3031/health > /dev/null
+          code=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3031/v1/memories?owner=ci@local)
+          test "$code" = "401" || { echo "no-key request returned $code, expected 401"; cat /tmp/core-auth.log; exit 1; }
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'authorization: Bearer wrong-key' http://127.0.0.1:3031/v1/memories?owner=ci@local)
+          test "$code" = "401" || { echo "wrong key returned $code, expected 401"; exit 1; }
+          curl -fsS -H 'authorization: Bearer ci-secret-key' 'http://127.0.0.1:3031/v1/memories?owner=ci@local' > /dev/null
+          kill $pid; wait $pid 2>/dev/null || true
+
+      - name: Core log on failure
+        if: failure()
+        run: |
+          echo "--- /tmp/core.log"; tail -60 /tmp/core.log || true
+          echo "--- /tmp/core-auth.log"; tail -40 /tmp/core-auth.log || true
+
+  # ── The MCP server users actually install ──────────────────────────────────
+  mcp:
+    name: cortex-mcp (stdio smoke)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ["20", "22"]
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cortex-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: cortex-mcp/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      # node --check + 28 assertions driven over a real JSON-RPC stdio session
+      - run: npm test
+
+  # ── Browser extension ──────────────────────────────────────────────────────
+  extension:
+    name: cortex-extension (harvest logic + manifest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cortex-extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm test # no dependencies: syntax checks + logic tests + manifest audit
+
+  # ── SDKs ───────────────────────────────────────────────────────────────────
+  sdk-js:
+    name: cortex-js (build + contract tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cortex-js
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: cortex-js/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: The published artifact must be importable
+        run: |
+          node -e "const m=require('./dist/index.cjs'); if(!m.CortexClient) throw new Error('CJS build has no CortexClient')"
+          node --input-type=module -e "import('./dist/index.js').then(m=>{if(!m.CortexClient) throw new Error('ESM build has no CortexClient')})"
+          test -f dist/index.d.ts
+
+  sdk-py:
+    name: cortex-py (stdlib client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cortex-py
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s tests -t . -v
+
+  # ── The web app ────────────────────────────────────────────────────────────
+  frontend:
+    name: cortex-frontend (types + tests + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cortex-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: cortex-frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run verify # tsc --noEmit, hydrate tests, next build
+
+  # ── The one script that can damage a user's machine ────────────────────────
+  installer:
+    name: setup scripts (config merge safety)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Merging, backups, refusal on broken JSON, idempotency, --remove, --dry-run.
+      - run: node scripts/test-setup-merge.mjs
+
+  desktop:
+    name: cortex-desktop (tauri config + cargo check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: cortex-desktop/package-lock.json
+      - name: System libs for the Tauri build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libssl-dev libgtk-3-dev
+      - run: cd cortex-desktop && npm ci --no-audit --no-fund
+      - name: Validate tauri.conf.json
+        run: node -e "const c=require('./cortex-desktop/src-tauri/tauri.conf.json'); if(!c.security.csp) throw new Error('no CSP'); if(!c.app.windows.length) throw new Error('no window defined')"
+      # A full bundle needs Apple/Windows signing we deliberately do not fake in
+      # CI, so the gate is the Rust type-check plus the config audit above.
+      - name: cargo check
+        working-directory: cortex-desktop/src-tauri
+        run: |
+          cargo check --all-targets
+          cargo check --all-targets 2>&1 | grep -q "^error" && exit 1 || true

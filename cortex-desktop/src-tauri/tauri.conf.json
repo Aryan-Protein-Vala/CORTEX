@@ -1,33 +1,97 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "cortex-desktop",
+  "productName": "CORTEX",
   "version": "0.1.0",
   "identifier": "com.aryansharma.cortex-desktop",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": "../src",
+    "removeUnusedCommands": true
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [],
+    "windows": [
+      {
+        "label": "main",
+        "title": "CORTEX",
+        "url": "index.html",
+        "width": 1080,
+        "height": 760,
+        "minWidth": 720,
+        "minHeight": 520,
+        "resizable": true,
+        "center": true,
+        "visible": true,
+        "decorations": true,
+        "backgroundColor": "#08060f"
+      }
+    ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data:",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "frame-src": "'none'",
+        "worker-src": "'self'",
+        "form-action": "'none'"
+      }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Aryan Sharma",
+    "copyright": "\u00a9 2026 Aryan Sharma \u00b7 AGPL-3.0-or-later",
+    "category": "DeveloperTool",
+    "shortDescription": "Desktop memory layer for every AI you use",
+    "longDescription": "CORTEX keeps a local graph of your facts, rules and decisions. This desktop shell reads and writes that graph through your own core process and registers cortex:// links so any tool can hand a namespace to it.",
+    "license": "AGPL-3.0-or-later",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installModes": [
+          "perUser"
+        ],
+        "displayLanguageSelector": false
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3"
+        ]
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
   },
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["cortex"]
+        "schemes": [
+          "cortex"
+        ]
       }
     }
   }

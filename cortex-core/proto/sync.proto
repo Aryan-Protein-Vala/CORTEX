@@ -1,3 +1,9 @@
+// STATUS: design artifact. Nothing in this repository compiles it.
+// There is no build.rs and no tonic codegen, and src/api/sync.rs answers
+// 'not implemented' for CRDT replication, so this file exists only to keep a
+// canonical mesh message definition around until someone ships the transport.
+// Do not re-add tonic/prost to Cargo.toml until a build.rs consumes this.
+
 syntax = "proto3";
 
 package cortex.sync;

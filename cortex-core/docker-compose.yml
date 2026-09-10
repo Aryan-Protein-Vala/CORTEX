@@ -1,16 +1,12 @@
-version: '3.8'
+# OPTIONAL. The core runs with zero services: the default backend is
+# `~/.cortex/cortex-graph.json`. Bring this up only if you want the extra
+# backends, then point the core at them:
+#   CORTEX_SURREAL_URL=ws://127.0.0.1:8000   (+ CORTEX_SURREAL_USER/_PASS/_NS/_DB)
+#   CORTEX_QDRANT_URL=http://127.0.0.1:6333
+# These credentials exist for localhost development. Do not expose these ports,
+# and do not treat this file as the install path in the README.
 
 services:
-  dragonfly:
-    image: 'docker.dragonflydb.io/dragonflydb/dragonfly'
-    container_name: cortex-dragonfly
-    ports:
-      - '127.0.0.1:6379:6379'
-    volumes:
-      - dragonfly-data:/data
-    command: >
-      --dir /data
-
   qdrant:
     image: qdrant/qdrant:latest
     container_name: cortex-qdrant
@@ -27,9 +23,8 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - surrealdb-data:/surreal/db
-    command: start --log trace --user root --pass cortex_god file:/surreal/db
+    command: start --user root --pass cortex_god file:/surreal/db
 
 volumes:
-  dragonfly-data:
   qdrant-data:
   surrealdb-data:

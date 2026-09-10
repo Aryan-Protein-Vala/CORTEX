@@ -4,10 +4,12 @@
   "private": true,
   "description": "Chrome extension that feeds AI chat conversations into a local CORTEX core. No build step: load unpacked.",
   "scripts": {
-    "test": "node --check background.js && node --check content.js && node --check inject.js && node --check popup.js && node --check harvest-core.js && node scripts/test-harvest.mjs",
+    "test": "node scripts/check-manifest.mjs && node --check background.js && node --check content.js && node --check inject.js && node --check popup.js && node --check harvest-core.js && node scripts/test-harvest.mjs",
     "check:manifest": "node scripts/check-manifest.mjs",
     "package": "rm -f ../dist/cortex-extension.zip && mkdir -p ../dist && zip -qr ../dist/cortex-extension.zip . -x 'scripts/*' -x 'package*.json' -x '.gitignore'"
   },
   "license": "AGPL-3.0-or-later",
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }

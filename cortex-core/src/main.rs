@@ -6,25 +6,23 @@
 //! Qdrant and mesh publishing are opt-in, each with a loud log line about which
 //! mode it ended up in — the banner never claims a capability it does not have.
 
-use crate::api::server::{
+// The binary is a thin wiring layer over the library: no `mod` declarations
+// here, because a second copy of every module would be compiled into the bin and
+// the integration tests would then exercise a different tree than the one users
+// run. `cargo test` and `cortex-core` share one source of truth.
+use cortex_core::api::server::{
     flush_all_sessions, spawn_background, start_server, AppState, CoreConfig, JobRegistry,
 };
-use crate::ai::openrouter::{OpenRouterClient, DEFAULT_MODEL};
-use crate::storage::graph_db::GraphMemory;
-use crate::storage::graph_store::GraphStore;
-use crate::storage::session::SessionBuffer;
-use crate::storage::store::FileGraphStore;
-use crate::storage::vector_db::VectorIndex;
+use cortex_core::ai::openrouter::{OpenRouterClient, DEFAULT_MODEL};
+use cortex_core::storage::graph_db::GraphMemory;
+use cortex_core::storage::graph_store::GraphStore;
+use cortex_core::storage::session::SessionBuffer;
+use cortex_core::storage::store::FileGraphStore;
+use cortex_core::storage::vector_db::VectorIndex;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
-pub mod types;
-pub mod ai;
-pub mod storage;
-pub mod engine;
-pub mod api;
 
 fn env_str(key: &str) -> Option<String> {
     std::env::var(key)

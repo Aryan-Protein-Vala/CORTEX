@@ -6,14 +6,14 @@ import { ArrowLeft, Plus, X, Sun, Moon } from 'lucide-react'
 import Link from 'next/link'
 
 const faqs = [
-  ['Which AIs support this cooked protocol?', 'All of them. ChatGPT, Claude, Gemini via our MCP. Because the protocol is open source, these mega-corps can’t lock you in anymore. Deal with it, Sam.'],
-  ['Can I export my memories?', 'Always. Memories are exportable JSON-LD. We don’t do that vendor lock-in bullshit.'],
-  ['Why SurrealDB?', 'Because relationships matter, bro. Relational databases are for boomers and document stores are for people who don\'t understand graph theory. We need to map nodes (you) to nodes (Python) with edges (simping) or the AI won\'t know shit.'],
-  ['Why Qdrant?', 'Because it\'s written in Rust and it\'s blazingly fast. We need to do vector similarity searches to find context before the LLM starts hallucinating like a fucking idiot.'],
-  ['How do you handle token limits?', 'We don\'t. We completely bypass that shit. We only inject the precise semantic triplets you need for the current thought. Your context window stays pristine.'],
-  ['What if I want to turn off memory decay?', 'You can pin memories so they never decay. But trust me, you say a lot of useless shit. Let the biological algorithm do its goddamn job.'],
-  ['Is there an API?', 'Obviously. We expose a REST API and an MCP server. Build whatever the fuck you want.'],
-  ['Who are you guys?', 'Just some engineers who got so goddamn frustrated with the amnesia pandemic in AI that we built the fix ourselves. Stop asking questions and start building.']
+  ['Which AIs support this cooked protocol?', 'Any MCP client: Claude Desktop and Claude Code, Cursor, Cline, Windsurf, Continue — and your own agent, since the core is plain REST over JSON. ChatGPT\u2019s consumer app cannot attach a local stdio MCP server, so for ChatGPT, Claude.ai and Gemini web you use the browser extension instead, consent-gated, at your own risk under their terms. We are not going to pretend otherwise.'],
+  ['Can I export my memories?', 'Always. GET /v1/export hands you one JSON document with every node, edge, confidence score and provenance field, and each node already carries a cortex:// URI. That is close enough to JSON-LD to frame in about five lines, and we deliberately do not call it JSON-LD until the export emits an @context itself. No vendor lock-in bullshit, including from us.'],
+  ['Do I need a database?', 'No. The default backend is a single JSON file at ~/.cortex/cortex-graph.json — readable with an editor, greppable, backable-up-able. SurrealDB and Qdrant are opt-in accelerators behind CORTEX_SURREAL_URL and CORTEX_QDRANT_URL, and the core logs which mode it actually got. If someone tells you graph memory requires a cluster, they are selling you the cluster.'],
+  ['Why would I turn on Qdrant?', 'When your graph gets big enough that exact-label lookup stops being enough. Qdrant adds ANN search over node embeddings (needs an embedding key). Without it, recall runs on labels, predicates, edge traversal and recency — which is honestly fine up to tens of thousands of memories.'],
+  ['How do you handle token limits?', 'We enforce them instead of praying. Every briefing is built against a token budget (default 600, clamped server-side by CORTEX_MAX_TOKEN_BUDGET), and when the budget cuts something off, the response says truncated: true rather than quietly dropping your context. The MCP tool refuses to pretend a 4,000-token dump is a 500-token budget.'],
+  ['What if I want to turn off memory decay?', 'CORTEX_DECAY_POLICY=off and nothing fades; =soft (the default) only ranks stale memory down; =hard actually prunes it. Pin anything with cortex_lock and it survives every policy, including hard. But trust me, you say a lot of useless shit — let the curve do its job.'],
+  ['Is there an API?', 'Yes, and it is not GraphQL: POST /v1/ingest, POST /v1/recall, /v1/flush, /v1/memories, /v1/stats, /v1/export, /v1/sweep, plus /ws for live graph events. Build whatever the fuck you want, and read the request schemas in cortex-core/src/api/server.rs because the docs are generated from the same structs, not from vibes.'],
+  ['Who are you guys?', 'One person: Aryan Sharma. No incorporation, no funding, no team page to pad. That is either a red flag or the reason the roadmap is honest — your call, and the license says you can always fork it if I get weird.'],
 ]
 
 function Reveal({ children, className = '' }: { children: React.ReactNode; className?: string }) {
