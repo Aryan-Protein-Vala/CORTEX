@@ -16,11 +16,37 @@ export class Cortex {
   constructor(config: string | CortexConfig) {
     if (typeof config === 'string') {
       this.apiKey = config;
-      this.baseUrl = (typeof process !== 'undefined' && process.env?.CORTEX_API_URL) || 'http://localhost:3030';
+      this.baseUrl = (typeof process !== 'undefined' && process.env?.CORTEX_API_URL) || 'http://127.0.0.1:3030';
     } else {
       this.apiKey = config.apiKey || 'cortex-local-key';
-      this.baseUrl = config.baseUrl || (typeof process !== 'undefined' && process.env?.CORTEX_API_URL) || 'http://localhost:3030';
+      this.baseUrl = config.baseUrl || (typeof process !== 'undefined' && process.env?.CORTEX_API_URL) || 'http://127.0.0.1:3030';
     }
+  }
+
+  /**
+   * Recalls relevant memory context for an agent query or user prompt
+   * @param prompt Query string to recall relevant graph memories
+   * @param options Optional user_id and token_budget (default: 500)
+   */
+  async recall(prompt: string, options?: { userId?: string; tokenBudget?: number }): Promise<GraphResponse> {
+    const response = await fetch(`${this.baseUrl}/v1/recall`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        user_id: options?.userId || 'default_user',
+        prompt,
+        token_budget: options?.tokenBudget || 500
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Cortex API error: ${response.statusText}`);
+    }
+
+    return await response.json();
   }
 
   /**

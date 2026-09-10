@@ -24,8 +24,9 @@ impl GraphMemory {
     
     /// Upsert a node into the graph
     pub async fn upsert_node(&self, node: &MemoryNode) -> Result<Option<MemoryNode>> {
+        let clean_id = node.id.trim_start_matches("node:");
         let created: Option<MemoryNode> = self.db
-            .update(("node", &node.id))
+            .update(("node", clean_id))
             .content(node)
             .await?;
         Ok(created)
@@ -33,14 +34,16 @@ impl GraphMemory {
     
     /// Get a node by ID
     pub async fn get_node(&self, id: &str) -> Result<Option<MemoryNode>> {
-        let node: Option<MemoryNode> = self.db.select(("node", id)).await?;
+        let clean_id = id.trim_start_matches("node:");
+        let node: Option<MemoryNode> = self.db.select(("node", clean_id)).await?;
         Ok(node)
     }
     
     /// Upsert an edge between two nodes
     pub async fn upsert_edge(&self, edge: &RelationalEdge) -> Result<Option<RelationalEdge>> {
+        let clean_id = edge.id.trim_start_matches("edge:");
         let created: Option<RelationalEdge> = self.db
-            .update(("edge", &edge.id))
+            .update(("edge", clean_id))
             .content(edge)
             .await?;
         Ok(created)
@@ -70,14 +73,36 @@ impl GraphMemory {
 
     /// Retrieve all nodes for a specific owner URI (cortex:// protocol)
     pub async fn get_nodes_by_owner(&self, owner_uri: &str) -> Result<Vec<MemoryNode>> {
-        let mut response = self.db.query("SELECT * FROM node WHERE owner_uri = $owner").bind(("owner", owner_uri)).await?;
+        let clean = owner_uri.trim_start_matches("cortex://").to_string();
+        let full = if owner_uri.starts_with("cortex://") { owner_uri.to_string() } else { format!("cortex://{}", owner_uri) };
+        let default_alias = if clean == "default" || clean == "default_user" { "default_user".to_string() } else { clean.clone() };
+        let default_cortex = if clean == "default" || clean == "default_user" { "cortex://default".to_string() } else { full.clone() };
+
+        let mut response = self.db.query("SELECT * FROM node WHERE owner_uri = $owner OR owner_uri = $clean OR owner_uri = $full OR owner_uri = $alias OR owner_uri = $dcortex")
+            .bind(("owner", owner_uri.to_string()))
+            .bind(("clean", clean))
+            .bind(("full", full))
+            .bind(("alias", default_alias))
+            .bind(("dcortex", default_cortex))
+            .await?;
         let nodes: Vec<MemoryNode> = response.take(0)?;
         Ok(nodes)
     }
 
     /// Retrieve all edges for a specific owner URI (cortex:// protocol)
     pub async fn get_edges_by_owner(&self, owner_uri: &str) -> Result<Vec<RelationalEdge>> {
-        let mut response = self.db.query("SELECT * FROM edge WHERE owner_uri = $owner").bind(("owner", owner_uri)).await?;
+        let clean = owner_uri.trim_start_matches("cortex://").to_string();
+        let full = if owner_uri.starts_with("cortex://") { owner_uri.to_string() } else { format!("cortex://{}", owner_uri) };
+        let default_alias = if clean == "default" || clean == "default_user" { "default_user".to_string() } else { clean.clone() };
+        let default_cortex = if clean == "default" || clean == "default_user" { "cortex://default".to_string() } else { full.clone() };
+
+        let mut response = self.db.query("SELECT * FROM edge WHERE owner_uri = $owner OR owner_uri = $clean OR owner_uri = $full OR owner_uri = $alias OR owner_uri = $dcortex")
+            .bind(("owner", owner_uri.to_string()))
+            .bind(("clean", clean))
+            .bind(("full", full))
+            .bind(("alias", default_alias))
+            .bind(("dcortex", default_cortex))
+            .await?;
         let edges: Vec<RelationalEdge> = response.take(0)?;
         Ok(edges)
     }
@@ -139,12 +164,14 @@ impl GraphMemory {
                 continue;
             }
 
-            let curr_id_full = format!("node:{}", curr_id);
+            let curr_id_clean = curr_id.trim_start_matches("node:").to_string();
+            let curr_id_full = format!("node:{}", curr_id_clean);
 
-            // Fetch outgoing and incoming edges safely with parameter binding
+            // Fetch outgoing and incoming edges matching either clean UUID or node:UUID
             let mut response = self.db
-                .query("SELECT * FROM edge WHERE source = $nid OR target = $nid")
-                .bind(("nid", curr_id_full))
+                .query("SELECT * FROM edge WHERE source = $s1 OR source = $s2 OR target = $s1 OR target = $s2")
+                .bind(("s1", curr_id_full.clone()))
+                .bind(("s2", curr_id_clean.clone()))
                 .await?;
 
             let found_edges: Vec<RelationalEdge> = response.take(0)?;
@@ -154,7 +181,7 @@ impl GraphMemory {
                     edges.push(edge.clone());
                 }
 
-                let neighbor_clean = if edge.source.contains(&curr_id) {
+                let neighbor_clean = if edge.source.contains(&curr_id_clean) {
                     edge.target.trim_start_matches("node:").to_string()
                 } else {
                     edge.source.trim_start_matches("node:").to_string()

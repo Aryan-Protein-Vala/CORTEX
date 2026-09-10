@@ -8,11 +8,12 @@ window.addEventListener('message', (event) => {
     const { id, prompt } = event.data;
 
     chrome.runtime.sendMessage({ type: "FETCH_MEMORY", prompt }, (response) => {
+      const briefing = response ? (response.briefing || response.context || null) : null;
       window.postMessage({
         source: 'CORTEX_BRIDGE',
         type: 'CORTEX_MEMORY_RES',
         id,
-        briefing: response ? response.briefing : null
+        briefing
       }, window.location.origin);
     });
   } else if (event.data.type === 'CORTEX_INGEST_REQ') {
@@ -25,39 +26,70 @@ window.addEventListener('message', (event) => {
 
 console.log("🧠 [CORTEX] Bridge loaded in isolated world.");
 
-// Auto-Ingest AI Responses via DOM Observation
+// Performance-optimized, debounced DOM observer for ChatGPT/Claude completion
 let observing = false;
-let lastIngestedText = "";
+let debounceTimer = null;
+let lastIngestedHash = "";
+
+function computeSimpleHash(text) {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash.toString();
+}
+
+function handleDomSettled() {
+  // Check if assistant response ingestion is explicitly enabled in user settings
+  chrome.storage.local.get(["ingest_assistant_responses", "cortex_enabled"], (items) => {
+    if (items.cortex_enabled === false || !items.ingest_assistant_responses) {
+      return; // Disabled by default to protect memory graph integrity (§3.3)
+    }
+
+    const assistantTurns = document.querySelectorAll('div[data-message-author-role="assistant"]');
+    if (!assistantTurns || assistantTurns.length === 0) return;
+
+    const lastTurn = assistantTurns[assistantTurns.length - 1];
+    const isStreaming = lastTurn.classList.contains('result-streaming') || document.querySelector('button[aria-label="Stop generating"]');
+    if (isStreaming) return;
+
+    const text = (lastTurn.textContent || lastTurn.innerText || "").trim();
+    if (text.length < 20) return;
+
+    const hash = computeSimpleHash(text);
+    if (hash === lastIngestedHash) return;
+    lastIngestedHash = hash;
+
+    // Truncate to avoid massive token bloat
+    const cleanSample = text.slice(0, 1000);
+    chrome.runtime.sendMessage({
+      type: "INGEST_CONVERSATION",
+      prompt: `[Assistant Output Context]: ${cleanSample}`
+    });
+    console.log("🧠 [CORTEX] Ingested verified assistant context.");
+  });
+}
 
 function startObserver() {
   if (observing) return;
-  const observer = new MutationObserver((mutations) => {
-    // Basic ChatGPT DOM observation
-    const turnElements = document.querySelectorAll('div[data-message-author-role="assistant"]');
-    if (turnElements.length > 0) {
-      const lastTurn = turnElements[turnElements.length - 1];
-      
-      // Check if it's done generating. Usually the stop button disappears or a specific class changes.
-      // A simple heuristic: if a response has settled for a moment without changing, or we detect the "Copy" button.
-      const isStreaming = lastTurn.classList.contains('result-streaming') || document.querySelector('button[aria-label="Stop generating"]');
-      
-      if (!isStreaming) {
-        const text = lastTurn.textContent || lastTurn.innerText;
-        if (text && text.trim().length > 10 && text !== lastIngestedText) {
-          lastIngestedText = text;
-          chrome.runtime.sendMessage({
-            type: "INGEST_CONVERSATION",
-            prompt: "[AI Response]: " + text
-          });
-          console.log("🧠 [CORTEX] Auto-ingested AI response");
-        }
-      }
-    }
+  const target = document.querySelector('main') || document.body;
+  if (!target) return;
+
+  const observer = new MutationObserver(() => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    // 1500ms debounce ensures the DOM has completely settled after streaming
+    debounceTimer = setTimeout(handleDomSettled, 1500);
   });
 
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  // Observe childList changes only — not characterData on every single stroke
+  observer.observe(target, { childList: true, subtree: true });
   observing = true;
 }
 
-// Start observing after a slight delay to let the app load
-setTimeout(startObserver, 2000);
+// Start observer after initial load
+if (document.readyState === 'complete') {
+  startObserver();
+} else {
+  window.addEventListener('load', startObserver);
+}

@@ -8,7 +8,24 @@ class Cortex:
     """
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         self.api_key = api_key
-        self.base_url = (base_url or os.getenv('CORTEX_API_URL', 'http://localhost:3030')).rstrip('/')
+        self.base_url = (base_url or os.getenv('CORTEX_API_URL', 'http://127.0.0.1:3030')).rstrip('/')
+
+    def recall(self, prompt: str, user_id: str = "default_user", token_budget: int = 500) -> Dict[str, Any]:
+        """
+        Recalls relevant context memories for a prompt from Cortex Core
+        """
+        headers = {
+            'Authorization': f'Bearer {self.api_key}',
+            'Content-Type': 'application/json'
+        }
+        data = {
+            "user_id": user_id,
+            "prompt": prompt,
+            "token_budget": token_budget
+        }
+        response = requests.post(f"{self.base_url}/v1/recall", json=data, headers=headers)
+        response.raise_for_status()
+        return response.json()
 
     def get_graph(self, uri: str, include_mesh: bool = False) -> Dict[str, Any]:
         """

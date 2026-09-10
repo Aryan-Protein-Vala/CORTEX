@@ -110,26 +110,26 @@ export default function DashboardPage() {
     return () => { if (ws) ws.close() }
   }, [])
 
+  const CORTEX_API = process.env.NEXT_PUBLIC_CORTEX_API_URL || 'http://127.0.0.1:3030'
+
   const handleInject = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!injectText.trim()) return
     setIsInjecting(true)
+    const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
     try {
-      const res = await fetch('http://localhost:3030/v1/ingest', {
+      const res = await fetch(`${CORTEX_API}/v1/ingest`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: 'default_user', prompt: injectText })
       })
-      const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
       if (res.ok) {
-        setLogs(prev => [{ id: Math.random().toString(36).substring(7), time: now, source: 'Dashboard', text: `Burned: "${injectText.slice(0, 50)}..."`, type: 'ingest' }, ...prev])
+        setLogs(prev => [{ id: Math.random().toString(36).substring(7), time: now, source: 'Dashboard', text: `Saved to memory: "${injectText.slice(0, 50)}..."`, type: 'ingest' }, ...prev])
+        setInjectText('')
       } else {
-        setLogs(prev => [{ id: Math.random().toString(36).substring(7), time: now, source: 'Simulator', text: `Synthesized: "${injectText.slice(0, 50)}..."`, type: 'ingest' }, ...prev])
+        setLogs(prev => [{ id: Math.random().toString(36).substring(7), time: now, source: 'Error', text: `Failed to persist: HTTP ${res.status}`, type: 'decay' }, ...prev])
       }
-      setInjectText('')
     } catch {
-      const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      setLogs(prev => [{ id: Math.random().toString(36).substring(7), time: now, source: 'Simulator', text: `Synthesized: "${injectText.slice(0, 50)}..."`, type: 'ingest' }, ...prev])
-      setInjectText('')
+      setLogs(prev => [{ id: Math.random().toString(36).substring(7), time: now, source: 'Error', text: `Cortex Core unreachable on ${CORTEX_API}`, type: 'decay' }, ...prev])
     } finally { setIsInjecting(false) }
   }
 
@@ -138,14 +138,19 @@ export default function DashboardPage() {
     if (!recallPrompt.trim()) return
     setIsRecalling(true); setRecallResult(null)
     try {
-      const res = await fetch('http://localhost:3030/v1/recall', {
+      const res = await fetch(`${CORTEX_API}/v1/recall`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: 'default_user', prompt: recallPrompt, token_budget: 500 })
       })
-      if (res.ok) { const data = await res.json(); setRecallResult(data.briefing || data.context || 'Memory recalled.') }
-      else { setRecallResult(`[CORTEX CONTEXT]: Found rules matching "${recallPrompt}": SurrealDB graph, Tailwind v4, RS256 JWT.`) }
-    } catch { setRecallResult(`[CORTEX CONTEXT]: Found rules matching "${recallPrompt}": SurrealDB graph, Tailwind v4, RS256 JWT.`) }
-    finally { setIsRecalling(false) }
+      if (res.ok) {
+        const data = await res.json()
+        setRecallResult(data.briefing || data.context || 'No matching memories found for this prompt.')
+      } else {
+        setRecallResult(`[CORTEX ERROR]: Core returned HTTP ${res.status}.`)
+      }
+    } catch {
+      setRecallResult(`[CORTEX OFFLINE]: Unable to connect to Cortex Core daemon on ${CORTEX_API}. Start it with 'cd cortex-core && cargo run'.`)
+    } finally { setIsRecalling(false) }
   }
 
   return (

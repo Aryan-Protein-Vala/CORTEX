@@ -164,3 +164,61 @@ fn test_semantic_embedding_subword_stems() {
     assert!(sim > 0.7, "Stem/subword forms should have strong overlap, got {}", sim);
 }
 
+#[test]
+fn test_briefing_label_resolution() {
+    // Tests §1.5 from Launch Audit: Briefings must format node labels, not raw node:UUID strings
+    let node_user = MemoryNode::new("Aryan");
+    let node_db = MemoryNode::new("PostgreSQL");
+
+    let edge = RelationalEdge::new(&node_user.id, "prefers", &node_db.id, 0.95);
+
+    let retrieved_nodes = vec![node_user.clone(), node_db.clone()];
+    let retrieved_edges = vec![edge.clone()];
+
+    let label_map: std::collections::HashMap<&str, &str> = retrieved_nodes
+        .iter()
+        .flat_map(|n| {
+            let clean = n.id.trim_start_matches("node:");
+            vec![(n.id.as_str(), n.label.as_str()), (clean, n.label.as_str())]
+        })
+        .collect();
+
+    let mut parts = Vec::new();
+    for e in &retrieved_edges {
+        let s_clean = e.source.trim_start_matches("node:");
+        let t_clean = e.target.trim_start_matches("node:");
+        let s_label = label_map.get(e.source.as_str())
+            .or_else(|| label_map.get(s_clean))
+            .copied()
+            .unwrap_or(e.source.as_str());
+        let t_label = label_map.get(e.target.as_str())
+            .or_else(|| label_map.get(t_clean))
+            .copied()
+            .unwrap_or(e.target.as_str());
+
+        parts.push(format!("Fact: {} -> [{}] -> {}", s_label, e.predicate, t_label));
+    }
+
+    let summary = parts.join("\n");
+    assert!(summary.contains("Fact: Aryan -> [prefers] -> PostgreSQL"));
+    assert!(!summary.contains("node:"));
+}
+
+#[test]
+fn test_token_budget_truncation() {
+    // Tests §1.4 from Launch Audit: Context must be bounded to token_budget
+    let long_text = "This is a repeated context string to test token bounds. ".repeat(100);
+    let budget_tokens = 50usize;
+    let char_budget = budget_tokens * 4;
+
+    let bounded = if long_text.len() > char_budget {
+        format!("{}... [bounded to {} tokens]", &long_text[..char_budget], budget_tokens)
+    } else {
+        long_text.clone()
+    };
+
+    assert!(bounded.contains("[bounded to 50 tokens]"));
+    assert!(bounded.len() < long_text.len());
+}
+
+

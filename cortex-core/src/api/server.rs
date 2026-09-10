@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use anyhow::Result;
 
 use crate::ai::openrouter::OpenRouterClient;
@@ -110,27 +110,63 @@ pub struct MeshPublishResponse {
     pub message: String,
 }
 
+/// Authentication middleware for /v1 endpoints when CORTEX_API_KEY is configured
+async fn require_api_key(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, axum::http::StatusCode> {
+    if let Some(ref key) = state.api_key {
+        let auth_header = req.headers().get(header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok());
+        let matches = match auth_header {
+            Some(val) => {
+                let token = val.strip_prefix("Bearer ").unwrap_or(val);
+                token == key
+            }
+            None => false,
+        };
+        if !matches {
+            return Err(axum::http::StatusCode::UNAUTHORIZED);
+        }
+    }
+    Ok(next.run(req).await)
+}
+
 /// Start the Cortex Core Engine API Server
 pub async fn start_server(port: u16, state: AppState) -> Result<()> {
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(tower_http::cors::AllowOrigin::predicate(|origin, _| {
+            let s = origin.to_str().unwrap_or("");
+            s.starts_with("http://localhost:")
+                || s.starts_with("http://127.0.0.1:")
+                || s.starts_with("https://localhost:")
+                || s.starts_with("chrome-extension://")
+                || s == "tauri://localhost"
+        }))
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION, header::ACCEPT]);
 
+    let v1_routes = Router::new()
+        .route("/recall", post(recall_context))
+        .route("/ingest", post(ingest_context))
+        .route("/inject", post(inject_uri_memory))
+        .route("/sweep", post(trigger_sweep))
+        .route("/resolve", get(resolve_uri))
+        .route("/mesh/publish", post(publish_to_mesh_endpoint))
+        .route("/crawler/config", post(configure_crawler))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), require_api_key));
+
     let app = Router::new()
         .route("/health", get(health_check))
-        .route("/v1/recall", post(recall_context))
-        .route("/v1/ingest", post(ingest_context))
-        .route("/v1/inject", post(inject_uri_memory))
-        .route("/v1/sweep", post(trigger_sweep))
-        .route("/v1/resolve", get(resolve_uri))
-        .route("/v1/mesh/publish", post(publish_to_mesh_endpoint))
-        .route("/v1/crawler/config", post(configure_crawler))
         .route("/ws", get(ws_handler))
+        .nest("/v1", v1_routes)
         .layer(cors)
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let host_str = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let host: std::net::IpAddr = host_str.parse().unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
+    let addr = SocketAddr::from((host, port));
     let listener = TcpListener::bind(addr).await?;
     
     println!("🧠 Cortex Core API running on http://{}", addr);
@@ -154,6 +190,17 @@ async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
     })
 }
 
+pub fn normalize_owner_uri(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "default_user" || trimmed == "default" || trimmed == "cortex://default_user" {
+        "cortex://default".to_string()
+    } else if !trimmed.starts_with("cortex://") {
+        format!("cortex://{}", trimmed)
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Resolves a custom protocol URI (e.g., cortex://user_123 or cortex://team_xyz) 
 /// and returns the associated graph for SDK ingestion.
 async fn resolve_uri(
@@ -163,12 +210,14 @@ async fn resolve_uri(
     let mut retrieved_nodes = Vec::new();
     let mut retrieved_edges = Vec::new();
 
+    let target_uri = normalize_owner_uri(&payload.uri);
+
     if let Some(ref graph) = state.graph {
         // Fetch personal / specific URI context
-        if let Ok(nodes) = graph.get_nodes_by_owner(&payload.uri).await {
+        if let Ok(nodes) = graph.get_nodes_by_owner(&target_uri).await {
             retrieved_nodes.extend(nodes);
         }
-        if let Ok(edges) = graph.get_edges_by_owner(&payload.uri).await {
+        if let Ok(edges) = graph.get_edges_by_owner(&target_uri).await {
             retrieved_edges.extend(edges);
         }
         
@@ -194,12 +243,31 @@ async fn resolve_uri(
         format!("No prior memories recorded under {}", payload.uri)
     } else {
         let mut summaries: Vec<String> = Vec::new();
+        let label_map: std::collections::HashMap<&str, &str> = retrieved_nodes
+            .iter()
+            .flat_map(|n| {
+                let clean = n.id.trim_start_matches("node:");
+                vec![(n.id.as_str(), n.label.as_str()), (clean, n.label.as_str())]
+            })
+            .collect();
+
         if !retrieved_nodes.is_empty() {
             let labels: Vec<&str> = retrieved_nodes.iter().map(|n| n.label.as_str()).collect();
             summaries.push(format!("Known concepts: {}", labels.join(", ")));
         }
         for e in &retrieved_edges {
-            summaries.push(format!("Relationship: {} -> [{}] -> {}", e.source, e.predicate, e.target));
+            let s_clean = e.source.trim_start_matches("node:");
+            let t_clean = e.target.trim_start_matches("node:");
+            let s_label = label_map.get(e.source.as_str())
+                .or_else(|| label_map.get(s_clean))
+                .copied()
+                .unwrap_or(e.source.as_str());
+            let t_label = label_map.get(e.target.as_str())
+                .or_else(|| label_map.get(t_clean))
+                .copied()
+                .unwrap_or(e.target.as_str());
+
+            summaries.push(format!("Relationship: {} -> [{}] -> {}", s_label, e.predicate, t_label));
         }
         summaries.join("\n")
     };
@@ -345,22 +413,50 @@ async fn recall_context(
         "No prior relevant memories found for this prompt.".to_string()
     } else {
         let mut parts = Vec::new();
+        let label_map: std::collections::HashMap<&str, &str> = retrieved_nodes
+            .iter()
+            .flat_map(|n| {
+                let clean = n.id.trim_start_matches("node:");
+                vec![(n.id.as_str(), n.label.as_str()), (clean, n.label.as_str())]
+            })
+            .collect();
+
         if !retrieved_nodes.is_empty() {
             let labels: Vec<&str> = retrieved_nodes.iter().map(|n| n.label.as_str()).collect();
             parts.push(format!("Known concepts: {}", labels.join(", ")));
         }
         for edge in &retrieved_edges {
-            parts.push(format!("Fact: {} -> [{}] -> {}", edge.source, edge.predicate, edge.target));
+            let s_clean = edge.source.trim_start_matches("node:");
+            let t_clean = edge.target.trim_start_matches("node:");
+            let s_label = label_map.get(edge.source.as_str())
+                .or_else(|| label_map.get(s_clean))
+                .copied()
+                .unwrap_or(edge.source.as_str());
+            let t_label = label_map.get(edge.target.as_str())
+                .or_else(|| label_map.get(t_clean))
+                .copied()
+                .unwrap_or(edge.target.as_str());
+
+            parts.push(format!("Fact: {} -> [{}] -> {}", s_label, edge.predicate, t_label));
         }
-        parts.join("\n")
+
+        let full_text = parts.join("\n");
+        let char_budget = payload.token_budget.unwrap_or(500) as usize * 4;
+        if full_text.len() > char_budget {
+            format!("{}... [bounded to {} tokens]", &full_text[..char_budget], payload.token_budget.unwrap_or(500))
+        } else {
+            full_text
+        }
     };
+
+    let token_estimate = (context_str.len() / 4).max(1) as u32;
 
     let packet = CortexContextPacket {
         user_id: payload.user_id.unwrap_or_else(|| "default_user".to_string()),
         nodes: retrieved_nodes.clone(),
         edges: retrieved_edges.clone(),
         rules: vec![],
-        token_estimate: payload.token_budget.unwrap_or(500),
+        token_estimate,
         context: context_str,
     };
 
@@ -470,6 +566,7 @@ async fn ingest_internal(
 
     let owner_uri = forced_owner
         .or(payload.user_id)
+        .map(|u| normalize_owner_uri(&u))
         .unwrap_or_else(|| "cortex://default".to_string());
 
     if let Some(ref graph) = state.graph {

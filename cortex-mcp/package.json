@@ -1,10 +1,10 @@
 {
-  "name": "cortex-mcp",
+  "name": "cortex-memory-mcp",
   "version": "1.0.0",
   "description": "Cortex MCP Server to inject persistent memory and global mesh context into Cursor, Claude Desktop, and Windsurf.",
   "main": "index.js",
   "bin": {
-    "cortex-mcp": "./index.js"
+    "cortex-memory-mcp": "./index.js"
   },
   "type": "module",
   "scripts": {

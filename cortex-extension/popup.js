@@ -2,6 +2,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusEl = document.getElementById('status-indicator');
   const latencyEl = document.getElementById('latency-val');
   const syncBtn = document.getElementById('sync-btn');
+  const toggleInput = document.getElementById('cortex-toggle');
+
+  // Load saved toggle state
+  chrome.storage.local.get(["cortex_enabled"], (items) => {
+    if (toggleInput) {
+      toggleInput.checked = items.cortex_enabled !== false;
+    }
+  });
+
+  if (toggleInput) {
+    toggleInput.addEventListener('change', (e) => {
+      chrome.storage.local.set({ cortex_enabled: e.target.checked });
+    });
+  }
 
   // Check connection status to Cortex Core
   chrome.runtime.sendMessage({ type: 'CHECK_STATUS' }, (res) => {

@@ -229,8 +229,11 @@ impl VectorIndex {
             },
         );
         
+        // Deterministic point UUID derived from node_id to prevent duplicate vector leaks
+        let point_id = deterministic_point_id(node_id);
+
         let point = PointStruct {
-            id: Some(Uuid::new_v4().to_string().into()),
+            id: Some(point_id.into()),
             vectors: Some(Vector::from(vector).into()),
             payload,
         };
@@ -240,6 +243,26 @@ impl VectorIndex {
         
         Ok(())
     }
+
+    /// Delete an embedding mapping by Node ID
+    pub async fn delete_mapping(&self, node_id: &str) -> Result<()> {
+        let point_id = deterministic_point_id(node_id);
+        let point_id_val: qdrant_client::qdrant::PointId = point_id.into();
+        let _ = self.client.delete_points(
+            qdrant_client::qdrant::DeletePointsBuilder::new(&self.collection_name)
+                .points(vec![point_id_val])
+                .build()
+        ).await;
+        Ok(())
+    }
+}
+
+fn deterministic_point_id(node_id: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(node_id.as_bytes());
+    let hash = hasher.finalize();
+    let bytes: [u8; 16] = hash[0..16].try_into().unwrap_or([0u8; 16]);
+    Uuid::from_bytes(bytes).to_string()
 }
 
 /// Compute a normalized deterministic semantic vector from raw text.
