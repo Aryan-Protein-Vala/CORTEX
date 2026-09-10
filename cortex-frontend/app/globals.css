@@ -36,3 +36,71 @@ button { font:inherit; color:inherit; }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition-duration:.01ms!important; animation-duration:.01ms!important; }.graph-path { stroke-dashoffset:0; }.footer-watermark { animation:none; opacity:.06; transform:none; } }
 .global-mesh { stroke: #3b82f6 !important; fill: #3b82f6 !important; }
 .dark .global-mesh { stroke: #60a5fa !important; fill: #60a5fa !important; }
+
+.dash-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+}
+.dash-sidebar {
+  width: 260px;
+  min-height: 100vh;
+  padding: 32px 24px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.dash-sidebar-top { margin-bottom: 50px; }
+
+.dash-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+.dash-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+  padding: 0 20px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--secondary);
+  text-decoration: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  transition: transform .2s, box-shadow .2s, background .2s, color .2s;
+}
+.dash-nav-item:hover {
+  color: var(--foreground);
+  background: var(--surface);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+}
+.dash-nav-item.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+.dash-nav-item.active:hover {
+  box-shadow: 0 10px 25px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.dash-sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.dash-main {
+  flex: 1;
+  background: var(--background);
+  position: relative;
+}

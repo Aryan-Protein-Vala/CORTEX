@@ -230,27 +230,11 @@ export default function BrainPage() {
   const [edges] = useState<EdgeData[]>(DEMO_EDGES)
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'var(--background)', zIndex: 50 }}>
-      {/* The 3D Canvas — fills the entire screen */}
+    <div style={{ position: 'absolute', inset: 0, background: 'var(--background)' }}>
+      {/* The 3D Canvas — fills the entire main dashboard area */}
       <Canvas camera={{ position: [0, 2, 8], fov: 50 }} style={{ width: '100%', height: '100%' }}>
         <Scene neurons={neurons} edges={edges} onSelectNeuron={setSelectedNeuron} />
       </Canvas>
-
-      {/* Back to Dashboard floating button */}
-      <Link
-        href="/dashboard"
-        style={{
-          position: 'absolute', top: 24, left: 24, zIndex: 60,
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '12px 20px', borderRadius: 8,
-          background: 'var(--surface)', backdropFilter: 'blur(12px)',
-          border: '1px solid var(--border)',
-          color: 'var(--foreground)', font: '12px monospace', textDecoration: 'none',
-          transition: 'all .2s', fontWeight: 'bold'
-        }}
-      >
-        <ArrowLeft size={16} /> BACK TO DASHBOARD
-      </Link>
 
       {/* Floating title */}
       <div style={{
