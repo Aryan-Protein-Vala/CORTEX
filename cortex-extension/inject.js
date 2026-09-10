@@ -1,118 +1,174 @@
-// Runs in MAIN world - hooks into window.fetch without inline script tags or CSP violations
+/**
+ * CORTEX page-world hook (MAIN world).
+ *
+ * Two jobs, both conditional on the mode the user chose:
+ *  - harvest: read the *actual* request body, which is far more reliable than
+ *    scraping the DOM (and works even when the app virtualises its transcript);
+ *  - rewrite (opt-in "request" mode only): append the memory block to an
+ *    existing text part. It never creates a part, never touches non-text parts
+ *    and gives up silently if the shape is unexpected — corrupting a user's
+ *    outgoing message is the one failure this file is not allowed to have.
+ */
+(function () {
+  "use strict";
 
-(function() {
+  const H = window.CortexHarvest;
+  if (!H || typeof window.fetch !== "function") return;
+
+  const mode = { current: "remember", budget: 400, ready: false };
+
+  // Ask the isolated bridge which mode the user picked; stay passive until told.
+  function handshake() {
+    const onConfig = (event) => {
+      if (event.source !== window) return;
+      const data = event.data;
+      if (!data || data.source !== "CORTEX_BRIDGE" || data.type !== "CORTEX_CONFIG_RES") return;
+      window.removeEventListener("message", onConfig);
+      mode.current = data.mode || "remember";
+      mode.budget = data.budget || 400;
+      mode.ready = true;
+    };
+    window.addEventListener("message", onConfig);
+    window.postMessage({ source: "CORTEX_INJECTOR", type: "CORTEX_CONFIG_REQ" }, window.location.origin);
+    setTimeout(() => {
+      if (!mode.ready) {
+        // No bridge (e.g. the content script failed to load): never rewrite.
+        mode.current = "remember";
+        mode.ready = true;
+      }
+    }, 800);
+  }
+  handshake();
+
+  const adapter = H.adapterFor(location.hostname);
+  if (!adapter) return;
+
   const originalFetch = window.fetch;
 
-  window.fetch = async function(...args) {
-    let [resource, config] = args;
-    const url = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
+  function textOf(body) {
+    if (typeof body === "string") return body;
+    if (body && typeof body.text === "function") return null; // unreadable stream: skip
+    return null;
+  }
 
-    const isChatGPT = url.includes('/backend-api/conversation');
-    const isClaude = url.includes('/api/append_message') || url.includes('/api/organizations/') && url.includes('/chat_conversations');
+  function harvest(turns) {
+    if (!turns || !turns.length) return;
+    if (mode.current === "remember" && !mode.ready) return;
+    window.postMessage({ source: "CORTEX_INJECTOR", type: "CORTEX_TURNS", turns }, window.location.origin);
+  }
 
-    if ((isChatGPT || isClaude) && config && config.body) {
+  window.fetch = async function (resource, init) {
+    const url = typeof resource === "string" ? resource : resource && resource.url ? resource.url : "";
+    const shouldInspect = adapter.request && adapter.request.match(url);
+    if (!shouldInspect) return originalFetch.apply(this, arguments);
+
+    let parsed = null;
+    const rawBody = textOf((init && init.body) || (resource && resource.body));
+    if (rawBody) {
       try {
-        let bodyObj = typeof config.body === 'string' ? JSON.parse(config.body) : config.body;
-        let promptText = "";
-
-        if (isChatGPT && bodyObj.messages && bodyObj.messages.length > 0) {
-          const lastMsg = bodyObj.messages[bodyObj.messages.length - 1];
-          if (lastMsg && lastMsg.content && Array.isArray(lastMsg.content.parts)) {
-            promptText = lastMsg.content.parts[0] || "";
-          }
-        } else if (isClaude && bodyObj.prompt) {
-          promptText = bodyObj.prompt;
-        }
-
-        if (promptText) {
-          const eventId = Math.random().toString(36).substring(7);
-
-          // Request memory briefing from isolated content bridge
-          const memoryPayload = await new Promise((resolve) => {
-            const timeout = setTimeout(() => {
-              window.removeEventListener('message', listener);
-              resolve(null);
-            }, 600); // 600ms responsive ceiling
-
-            const listener = (event) => {
-              if (event.source === window && event.origin === window.location.origin && event.data && event.data.type === 'CORTEX_MEMORY_RES' && event.data.id === eventId) {
-                clearTimeout(timeout);
-                window.removeEventListener('message', listener);
-                resolve(event.data.briefing);
-              }
-            };
-
-            window.addEventListener('message', listener);
-            window.postMessage({ source: 'CORTEX_INJECTOR', type: 'CORTEX_MEMORY_REQ', id: eventId, prompt: promptText }, window.location.origin);
-          });
-
-          if (memoryPayload && memoryPayload !== "{}") {
-            let formattedBriefing = "";
-            try {
-              const parsed = typeof memoryPayload === 'string' ? JSON.parse(memoryPayload) : memoryPayload;
-              if (parsed.context && typeof parsed.context === 'string' && !parsed.context.includes("No prior")) {
-                formattedBriefing = parsed.context;
-              } else if (parsed.briefing && typeof parsed.briefing === 'string') {
-                formattedBriefing = parsed.briefing;
-              }
-            } catch {
-              formattedBriefing = String(memoryPayload);
-            }
-
-            if (formattedBriefing) {
-              console.log("🧠 [CORTEX] Injected Hive Mind Memory Context:", formattedBriefing);
-              const injection = `[SYSTEM CORTEX CONTEXT:\n${formattedBriefing}\n]\n\n`;
-
-              if (isChatGPT && bodyObj.messages) {
-                const lastMsg = bodyObj.messages[bodyObj.messages.length - 1];
-                if (lastMsg && lastMsg.content && lastMsg.content.parts) {
-                  lastMsg.content.parts[0] = `${injection}${lastMsg.content.parts[0]}`;
-                }
-              } else if (isClaude && bodyObj.prompt) {
-                bodyObj.prompt = `${injection}${bodyObj.prompt}`;
-              }
-
-              config.body = JSON.stringify(bodyObj);
-            }
-          }
-        }
-      } catch (err) {
-        console.warn("🧠 [CORTEX] Interception pass-through due to error:", err);
+        parsed = JSON.parse(rawBody);
+      } catch (error) {
+        parsed = null; // not JSON we understand: pass through untouched
       }
     }
 
-    const response = await originalFetch(resource, config);
-
-    // Two-way sync: Ingest conversation turns so Cortex continues to learn
-    if ((isChatGPT || isClaude) && config && config.body) {
+    if (parsed) {
+      let turns = [];
+      // 1. Harvest exactly what is being sent (already free of our own block).
       try {
-        let bodyObj = typeof config.body === 'string' ? JSON.parse(config.body) : config.body;
-        let promptText = "";
-        if (isChatGPT && bodyObj.messages && bodyObj.messages.length > 0) {
-          const lastMsg = bodyObj.messages[bodyObj.messages.length - 1];
-          if (lastMsg && lastMsg.content && Array.isArray(lastMsg.content.parts)) {
-            promptText = lastMsg.content.parts[0] || "";
-          }
-        } else if (isClaude && bodyObj.prompt) {
-          promptText = bodyObj.prompt;
-        }
+        turns = (adapter.request.extract(parsed) || []).map((t) => ({ role: t.role, text: H.stripBlock(t.text) }));
+      } catch (error) {
+        turns = [];
+      }
+      harvest(turns);
 
-        if (promptText) {
-          // Strip system cortex context prefix before ingesting into memory
-          const cleanPrompt = promptText.replace(/\[SYSTEM CORTEX CONTEXT:[\s\S]*?\]\n\n/, '');
-          window.postMessage({
-            source: 'CORTEX_INJECTOR',
-            type: 'CORTEX_INGEST_REQ',
-            prompt: cleanPrompt
-          }, window.location.origin);
+      // 2. Rewrite only when the user explicitly enabled it, and only with the
+      // briefing for *this* prompt (a cached one from the previous question would
+      // be worse than none).
+      if (mode.current === "request" && init) {
+        const userTurn = turns.filter((t) => t.role === "user").pop();
+        if (userTurn && userTurn.text) {
+          const briefing = await briefingFor(userTurn.text, 1200);
+          const next = appendContext(parsed, H.contextBlock(briefing, "request", (mode.budget || 400) * 4));
+          if (next) {
+            const headers = new Headers((init.headers || (resource && resource.headers)) || {});
+            if (!headers.has("content-type")) headers.set("content-type", "application/json");
+            const clone = new Request(url, { ...toRequestInit(init), body: JSON.stringify(next), headers });
+            return originalFetch.call(this, clone, undefined);
+          }
         }
-      } catch {
-        // Silently pass
       }
     }
 
-    return response;
+    return originalFetch.apply(this, arguments);
   };
 
-  console.log("🧠 [CORTEX] Injector active in MAIN world.");
+  function toRequestInit(init) {
+    const out = {};
+    for (const key of ["method", "headers", "body", "mode", "credentials", "cache", "signal", "integrity", "keepalive", "referrer", "referrerPolicy", "duplex"]) {
+      if (init[key] !== undefined) out[key] = init[key];
+    }
+    return out;
+  }
+
+  let cachedBriefing = { key: "", text: "", at: 0 };
+
+  async function briefingFor(prompt, waitMs) {
+    if (!prompt) return "";
+    const now = Date.now();
+    // Same prompt retried within 6s (network hiccup) reuses the answer.
+    if (cachedBriefing.key === prompt && now - cachedBriefing.at < 6000) return cachedBriefing.text;
+    const text = await new Promise((resolve) => {
+      const id = Math.random().toString(36).slice(2);
+      const timer = setTimeout(() => {
+        window.removeEventListener("message", listener);
+        resolve("");
+      }, Math.min(2000, Math.max(150, waitMs || 1200))); // the user's send never waits on us
+      const listener = (event) => {
+        const data = event.data;
+        if (event.source !== window || !data || data.source !== "CORTEX_BRIDGE" || data.type !== "CORTEX_MEMORY_RES" || data.id !== id) return;
+        clearTimeout(timer);
+        window.removeEventListener("message", listener);
+        resolve(typeof data.briefing === "string" ? data.briefing : "");
+      };
+      window.addEventListener("message", listener);
+      window.postMessage({ source: "CORTEX_INJECTOR", type: "CORTEX_MEMORY_REQ", id, prompt }, window.location.origin);
+    });
+    cachedBriefing = { key: prompt, text, at: now };
+    return text;
+  }
+
+
+  /**
+   * Append our block to the last *string* part of the newest user message.
+   * Returns a new object (never mutated in place), or null when there is no safe
+   * place to put it — an image-first multimodal turn, for instance.
+   */
+  function appendContext(body, block) {
+    const messages = body.messages;
+    if (!Array.isArray(messages) || !messages.length) return null;
+    const last = messages[messages.length - 1];
+    if (!last || (last.author && last.author.role && last.author.role !== "user")) return null;
+    const content = last.content;
+    if (!content || typeof content !== "object") return null;
+
+    if (!block) return null;
+
+    if (typeof content.parts === "string") {
+      return { ...body, messages: [...messages.slice(0, -1), { ...last, content: { ...content, parts: content.parts + block } }] };
+    }
+    if (!Array.isArray(content.parts)) return null;
+    let index = -1;
+    for (let i = content.parts.length - 1; i >= 0; i--) {
+      if (typeof content.parts[i] === "string") {
+        index = i;
+        break;
+      }
+    }
+    if (index === -1) return null; // text-less turn (image only): leave it alone
+    const parts = content.parts.slice();
+    parts[index] = parts[index] + block;
+    return { ...body, messages: [...messages.slice(0, -1), { ...last, content: { ...content, parts } }] };
+  }
+
 })();
