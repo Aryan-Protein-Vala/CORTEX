@@ -102,7 +102,6 @@ function Neuron({ data, onClick }: { data: NeuronData; onClick: (n: NeuronData) 
         color={hovered ? '#f59e0b' : data.retention < 0.35 ? '#94a3b8' : '#64748b'}
         anchorX="center"
         anchorY="top"
-        font="/fonts/inter.woff"
         outlineWidth={0}
       >
         {data.label}
