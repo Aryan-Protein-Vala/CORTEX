@@ -13,6 +13,7 @@ use crate::storage::graph_db::GraphMemory;
 use crate::storage::vector_db::VectorIndex;
 use crate::storage::working_memory::WorkingMemory;
 use crate::ai::openrouter::OpenRouterClient;
+use crate::engine::crawler::CrawlerEngine;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // 2. Initialize Vector Database (Qdrant)
-    let vector = match VectorIndex::new(&qdrant_url, "cortex_nodes") {
+    let vector_idx = match VectorIndex::new(&qdrant_url, "cortex_nodes") {
         Ok(vi) => {
             let _ = vi.ensure_collection().await;
             println!("✅ Connected to Qdrant Vector Index at {}", qdrant_url);
@@ -54,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // 3. Initialize Working Memory (Redis/Dragonfly)
-    let working = match WorkingMemory::new(&redis_url) {
+    let working_mem = match WorkingMemory::new(&redis_url) {
         Ok(wm) => {
             println!("✅ Connected to Dragonfly Working Memory at {}", redis_url);
             Some(Arc::new(wm))
@@ -66,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // 4. Initialize Shadow Kernel AI Extractor
-    let openrouter = match openrouter_key {
+    let openrouter_client = match openrouter_key {
         Some(ref key) if !key.is_empty() && !key.starts_with("sk-or-v1-...") => {
             println!("✅ OpenRouter AI Extraction Kernel initialized.");
             Some(Arc::new(OpenRouterClient::new(key.clone())))
@@ -85,9 +86,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState {
         graph: graph.clone(),
-        vector: vector.clone(),
-        working: working.clone(),
-        openrouter: openrouter.clone(),
+        vector: vector_idx,
+        working: working_mem,
+        openrouter: openrouter_client,
+        crawler: Arc::new(tokio::sync::Mutex::new(CrawlerEngine::new())),
         decay: decay.clone(),
         overwrite: overwrite.clone(),
         ws_tx: ws_tx.clone(),

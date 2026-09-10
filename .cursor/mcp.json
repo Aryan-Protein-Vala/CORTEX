@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "node",
+      "args": ["/Users/aryansharma/Desktop/CORTEX/cortex-mcp/index.js"],
+      "env": {
+        "CORTEX_API_URL": "http://localhost:3030"
+      }
+    }
+  }
+}

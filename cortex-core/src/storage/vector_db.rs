@@ -4,19 +4,101 @@ use qdrant_client::qdrant::{
 };
 use qdrant_client::Qdrant;
 use uuid::Uuid;
+use sha2::{Sha256, Digest};
+use std::time::Duration;
+
+const VECTOR_DIM: usize = 128;
+
+const SEMANTIC_CLUSTERS: &[(&[&str], usize)] = &[
+    (&["db", "database", "sql", "postgres", "postgresql", "mysql", "surrealdb", "qdrant", "sqlite", "redis", "mongodb", "storage", "schema", "table", "tables", "query", "queries", "migration", "datastore", "nosql", "orm", "prisma", "diesel", "record", "records"], 0),
+    (&["auth", "authentication", "authorize", "authorization", "oauth", "jwt", "session", "sessions", "login", "signup", "password", "token", "tokens", "credentials", "security", "permission", "permissions", "rbac", "secret", "crypto", "encryption", "tls", "ssl"], 1),
+    (&["frontend", "ui", "ux", "css", "tailwind", "react", "nextjs", "vue", "svelte", "dom", "html", "style", "styles", "component", "components", "button", "buttons", "modal", "modals", "page", "client", "layout", "view", "render", "animation", "design"], 2),
+    (&["backend", "server", "api", "apis", "endpoint", "endpoints", "rest", "grpc", "http", "https", "route", "routes", "handler", "handlers", "middleware", "controller", "microservice", "daemon", "service", "services", "router", "webhook", "payload"], 3),
+    (&["architecture", "pattern", "patterns", "rule", "rules", "guideline", "guidelines", "standard", "standards", "convention", "conventions", "structure", "design", "constraint", "constraints", "invariant", "principle", "principles", "clean", "modular"], 4),
+    (&["memory", "graph", "cortex", "recall", "ingest", "synapse", "retention", "decay", "triplet", "knowledge", "context", "brain", "node", "nodes", "edge", "edges", "vector", "semantic", "mesh"], 5),
+    (&["test", "testing", "tests", "spec", "assert", "assertion", "benchmark", "benchmarks", "mock", "mocks", "stub", "ci", "coverage", "unit", "e2e", "integration"], 6),
+    (&["deploy", "deployment", "docker", "k8s", "kubernetes", "cloud", "aws", "gcp", "azure", "production", "container", "containers", "devops", "release", "pipeline", "env", "staging", "serverless"], 7),
+    (&["error", "errors", "bug", "bugs", "crash", "exception", "exceptions", "failure", "trace", "panic", "fix", "debug", "debugging", "issue", "issues", "fault"], 8),
+    (&["rust", "python", "typescript", "javascript", "golang", "wasm", "cargo", "npm", "pip", "crate", "package"], 9),
+    (&["state", "cache", "caching", "dragonfly", "ttl", "in-memory", "lru", "store"], 10),
+    (&["async", "await", "thread", "threads", "concurrency", "channel", "channels", "mutex", "tokio", "sync", "future", "parallel", "queue"], 11),
+    (&["network", "socket", "sockets", "websocket", "websockets", "tcp", "udp", "stream", "packet", "port", "dns", "ip", "proxy", "gateway"], 12),
+    (&["config", "configuration", "settings", "variable", "variables", "dotenv", "flag", "args", "toml", "yaml", "json"], 13),
+    (&["performance", "latency", "throughput", "opt", "optimize", "fast", "speed", "scale", "scaling", "profiling"], 14),
+    (&["cursor", "vscode", "mcp", "extension", "plugin", "editor", "ide", "claude", "agent", "agents", "llm", "assistant"], 15),
+];
+
+const STOPWORDS: &[&str] = &[
+    "a", "an", "the", "and", "or", "in", "on", "at", "by", "for", "with", "about",
+    "against", "between", "into", "through", "during", "before", "after", "above",
+    "below", "to", "from", "up", "down", "is", "are", "was", "were", "be", "been",
+    "being", "have", "has", "had", "do", "does", "did", "this", "that", "these",
+    "those", "it", "its", "we", "you", "they", "i", "of"
+];
+
+#[derive(serde::Serialize)]
+struct RemoteEmbeddingRequest<'a> {
+    input: &'a str,
+    model: &'a str,
+    dimensions: usize,
+}
+
+#[derive(serde::Deserialize)]
+struct RemoteEmbeddingResponse {
+    data: Vec<RemoteEmbeddingItem>,
+}
+
+#[derive(serde::Deserialize)]
+struct RemoteEmbeddingItem {
+    embedding: Vec<f32>,
+}
 
 pub struct VectorIndex {
     client: Qdrant,
     collection_name: String,
+    http_client: reqwest::Client,
+    openai_api_key: Option<String>,
+    openrouter_api_key: Option<String>,
 }
 
 impl VectorIndex {
     pub fn new(url: &str, collection_name: &str) -> Result<Self> {
         let client = Qdrant::from_url(url).build().context("Failed to build Qdrant client")?;
-        
+        let http_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap_or_default();
+
+        let openai_api_key = std::env::var("OPENAI_API_KEY").ok().filter(|s| !s.trim().is_empty());
+        let openrouter_api_key = std::env::var("OPENROUTER_API_KEY").ok().filter(|s| !s.trim().is_empty());
+
         Ok(Self {
             client,
             collection_name: collection_name.to_string(),
+            http_client,
+            openai_api_key,
+            openrouter_api_key,
+        })
+    }
+
+    pub fn with_keys(
+        url: &str,
+        collection_name: &str,
+        openai_key: Option<String>,
+        openrouter_key: Option<String>,
+    ) -> Result<Self> {
+        let client = Qdrant::from_url(url).build().context("Failed to build Qdrant client")?;
+        let http_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap_or_default();
+
+        Ok(Self {
+            client,
+            collection_name: collection_name.to_string(),
+            http_client,
+            openai_api_key: openai_key,
+            openrouter_api_key: openrouter_key,
         })
     }
 
@@ -26,7 +108,7 @@ impl VectorIndex {
         
         if let Ok(exists) = self.client.collection_exists(&self.collection_name).await {
             if !exists {
-                let params = VectorParamsBuilder::new(128, Distance::Cosine).build();
+                let params = VectorParamsBuilder::new(VECTOR_DIM as u64, Distance::Cosine).build();
                 let request = CreateCollectionBuilder::new(&self.collection_name)
                     .vectors_config(params)
                     .build();
@@ -36,36 +118,78 @@ impl VectorIndex {
         Ok(())
     }
 
-    /// Generate a normalized deterministic semantic vector from raw text
+    /// Primary entrypoint: High-dimensional semantic embedding.
+    /// Tries remote LLM API (OpenAI / OpenRouter) if keys exist, falling back seamlessly to local semantic embedding.
+    pub async fn embed_text_semantic(&self, text: &str) -> Vec<f32> {
+        if let Some(ref api_key) = self.openai_api_key {
+            if let Ok(vec) = self.request_openai_embedding(text, api_key).await {
+                if vec.len() == VECTOR_DIM {
+                    return vec;
+                }
+            }
+        }
+
+        if let Some(ref api_key) = self.openrouter_api_key {
+            if let Ok(vec) = self.request_openrouter_embedding(text, api_key).await {
+                if vec.len() == VECTOR_DIM {
+                    return vec;
+                }
+            }
+        }
+
+        // Resilient fallback to local semantic subword + concept cluster embedding
+        self.embed_text(text)
+    }
+
+    /// Synchronous deterministic semantic embedding (local fallback)
     pub fn embed_text(&self, text: &str) -> Vec<f32> {
-        use sha2::{Sha256, Digest};
-        let dim = 128;
-        let mut vec = vec![0.0f32; dim];
-        let lower = text.to_lowercase();
-        let words: Vec<&str> = lower.split_whitespace().collect();
-        
-        if words.is_empty() {
-            return vec;
+        compute_local_embedding(text)
+    }
+
+    async fn request_openai_embedding(&self, text: &str, api_key: &str) -> Result<Vec<f32>> {
+        let payload = RemoteEmbeddingRequest {
+            input: text,
+            model: "text-embedding-3-small",
+            dimensions: VECTOR_DIM,
+        };
+
+        let resp = self.http_client
+            .post("https://api.openai.com/v1/embeddings")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            anyhow::bail!("OpenAI embedding returned HTTP {}", resp.status());
         }
-        
-        for word in words {
-            let mut hasher = Sha256::new();
-            hasher.update(word.as_bytes());
-            let hash = hasher.finalize();
-            for i in 0..dim {
-                let byte_idx = i % hash.len();
-                let val = (hash[byte_idx] as f32 / 255.0) - 0.5;
-                vec[i] += val;
-            }
+
+        let result: RemoteEmbeddingResponse = resp.json().await?;
+        result.data.into_iter().next().map(|d| d.embedding).context("No embedding in response")
+    }
+
+    async fn request_openrouter_embedding(&self, text: &str, api_key: &str) -> Result<Vec<f32>> {
+        let payload = RemoteEmbeddingRequest {
+            input: text,
+            model: "openai/text-embedding-3-small",
+            dimensions: VECTOR_DIM,
+        };
+
+        let resp = self.http_client
+            .post("https://openrouter.ai/api/v1/embeddings")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            anyhow::bail!("OpenRouter embedding returned HTTP {}", resp.status());
         }
-        
-        let norm = (vec.iter().map(|v| v * v).sum::<f32>()).sqrt();
-        if norm > 0.0 {
-            for v in vec.iter_mut() {
-                *v /= norm;
-            }
-        }
-        vec
+
+        let result: RemoteEmbeddingResponse = resp.json().await?;
+        result.data.into_iter().next().map(|d| d.embedding).context("No embedding in response")
     }
     
     /// Map text to an existing node ID via semantic search
@@ -115,5 +239,93 @@ impl VectorIndex {
         self.client.upsert_points(upsert_request).await?;
         
         Ok(())
+    }
+}
+
+/// Compute a normalized deterministic semantic vector from raw text.
+/// Uses concept cluster anchors (dims 0..31) and subword character n-grams + full-word projections (dims 32..127).
+pub fn compute_local_embedding(text: &str) -> Vec<f32> {
+    let mut vec = vec![0.0f32; VECTOR_DIM];
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+        .filter(|w| !w.is_empty())
+        .collect();
+
+    if words.is_empty() {
+        return vec;
+    }
+
+    for word in &words {
+        // 1. Concept Cluster Anchors (dims 0..31)
+        for (keywords, cluster_idx) in SEMANTIC_CLUSTERS {
+            let matched = keywords.iter().any(|k| {
+                *k == *word
+                    || (k.len() >= 4 && word.starts_with(k))
+                    || (word.len() >= 4 && k.starts_with(word))
+            });
+            if matched {
+                let dim_a = cluster_idx * 2;
+                let dim_b = cluster_idx * 2 + 1;
+                if dim_b < 32 {
+                    vec[dim_a] += 2.0;
+                    vec[dim_b] += 1.0;
+                }
+            }
+        }
+
+        // Filter stopwords from subword projections to prevent dilution
+        if STOPWORDS.contains(word) {
+            continue;
+        }
+
+        // 2. Full word token projection (dims 32..127)
+        let mut word_hasher = Sha256::new();
+        word_hasher.update(word.as_bytes());
+        let word_hash = word_hasher.finalize();
+        let word_target_dim = 32 + ((word_hash[0] as usize | ((word_hash[1] as usize) << 8)) % 96);
+        let word_val = ((word_hash[2] as f32 / 255.0) - 0.5) * 2.0;
+        vec[word_target_dim] += word_val;
+
+        // 3. Subword character n-grams (3-grams, 4-grams)
+        let chars: Vec<char> = word.chars().collect();
+        for n in 3..=4 {
+            if chars.len() >= n {
+                for window in chars.windows(n) {
+                    let ngram: String = window.iter().collect();
+                    let mut ngram_hasher = Sha256::new();
+                    ngram_hasher.update(ngram.as_bytes());
+                    let ngram_hash = ngram_hasher.finalize();
+                    let target_dim = 32 + ((ngram_hash[0] as usize | ((ngram_hash[1] as usize) << 8)) % 96);
+                    let val = ((ngram_hash[2] as f32 / 255.0) - 0.5) * 0.8;
+                    vec[target_dim] += val;
+                }
+            }
+        }
+    }
+
+    // L2 Unit Normalization
+    let norm = (vec.iter().map(|v| v * v).sum::<f32>()).sqrt();
+    if norm > 0.0 {
+        for v in vec.iter_mut() {
+            *v /= norm;
+        }
+    }
+
+    vec
+}
+
+/// Calculate cosine similarity between two vector slices
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a == 0.0 || norm_b == 0.0 {
+        0.0
+    } else {
+        dot / (norm_a * norm_b)
     }
 }

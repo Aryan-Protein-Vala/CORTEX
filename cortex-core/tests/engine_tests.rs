@@ -126,3 +126,41 @@ fn test_global_mesh_node_deduplication() {
     assert_eq!(combined_nodes[0].id, "node:react19");
     assert_eq!(combined_nodes[1].id, "node:server_actions");
 }
+
+#[test]
+fn test_semantic_embedding_concept_clusters() {
+    use cortex_core::storage::vector_db::{compute_local_embedding, cosine_similarity};
+
+    let doc_db = compute_local_embedding("Always use PostgreSQL for data storage");
+    let query_db = compute_local_embedding("What database do we use for storing records?");
+    let doc_ui = compute_local_embedding("Tailwind CSS button styling in React modal");
+
+    assert_eq!(doc_db.len(), 128);
+    assert_eq!(query_db.len(), 128);
+    assert_eq!(doc_ui.len(), 128);
+
+    // Verify L2 normalization
+    let norm: f32 = doc_db.iter().map(|x| x * x).sum::<f32>().sqrt();
+    assert!((norm - 1.0).abs() < 0.001);
+
+    // Database concepts should have strong semantic similarity
+    let sim_db = cosine_similarity(&doc_db, &query_db);
+    // Unrelated UI concept should have much lower similarity
+    let sim_unrelated = cosine_similarity(&doc_db, &doc_ui);
+
+    assert!(sim_db > 0.5, "Expected sim_db > 0.5, got {}", sim_db);
+    assert!(sim_unrelated < 0.25, "Expected sim_unrelated < 0.25, got {}", sim_unrelated);
+    assert!(sim_db > sim_unrelated * 2.0, "Database query should be significantly closer than UI query");
+}
+
+#[test]
+fn test_semantic_embedding_subword_stems() {
+    use cortex_core::storage::vector_db::{compute_local_embedding, cosine_similarity};
+
+    let v1 = compute_local_embedding("authentication");
+    let v2 = compute_local_embedding("authenticating");
+
+    let sim = cosine_similarity(&v1, &v2);
+    assert!(sim > 0.7, "Stem/subword forms should have strong overlap, got {}", sim);
+}
+

@@ -1,13 +1,35 @@
 {
   "name": "cortex-mcp",
   "version": "1.0.0",
-  "description": "Cortex MCP Server to inject the Hive Mind into Cursor and Windsurf.",
+  "description": "Cortex MCP Server to inject persistent memory and global mesh context into Cursor, Claude Desktop, and Windsurf.",
   "main": "index.js",
+  "bin": {
+    "cortex-mcp": "./index.js"
+  },
   "type": "module",
   "scripts": {
     "start": "node index.js"
   },
+  "keywords": [
+    "cortex",
+    "mcp",
+    "model-context-protocol",
+    "cursor",
+    "claude-desktop",
+    "windsurf",
+    "memory",
+    "knowledge-graph",
+    "ai-agent"
+  ],
+  "author": "Cortex Core Team",
+  "license": "Apache-2.0",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.1"
-  }
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "zod": "^3.23.8"
+  },
+  "files": [
+    "index.js",
+    "package.json",
+    "README.md"
+  ]
 }

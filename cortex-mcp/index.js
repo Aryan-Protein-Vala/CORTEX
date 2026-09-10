@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -55,12 +56,12 @@ server.tool(
       const data = await response.json();
       
       return {
-        content: [{ type: "text", text: `[SYSTEM CORTEX CONTEXT: ${data.briefing}]` }]
+        content: [{ type: "text", text: `[SYSTEM CORTEX CONTEXT: ${data.briefing || data.context || 'No specific memory found.'}]` }]
       };
     } catch (error) {
       console.error("Cortex API unreachable", error);
       return {
-        content: [{ type: "text", text: `Error: Could not connect to Cortex Core Rust Engine on ${CORTEX_URL}.` }]
+        content: [{ type: "text", text: `Error: Could not connect to Cortex Core Rust Engine on ${CORTEX_URL}. Ensure cortex-core is running via 'cargo run' or docker compose.` }]
       };
     }
   }
@@ -69,9 +70,9 @@ server.tool(
 // Create a tool that Cursor/Windsurf can call to store permanent memory
 server.tool(
   "store_cortex_memory",
-  "Permanently save a fact, preference, or concept into the central Cortex Hive Mind, optionally scoped by URI.",
+  "Permanently save a fact, preference, or architectural rule into the central Cortex Hive Mind, optionally scoped by URI.",
   {
-    fact: z.string().describe("The statement or fact to permanently store into memory, e.g. 'User prefers PostgreSQL over MongoDB'."),
+    fact: z.string().describe("The statement or fact to permanently store into memory, e.g. 'User prefers PostgreSQL over MongoDB' or 'Always use Tailwind v4'."),
     uri: z.string().optional().describe("Optional Cortex URI namespace, e.g. cortex://user_123 or cortex://team_eng")
   },
   async ({ fact, uri }) => {
@@ -105,7 +106,35 @@ server.tool(
     } catch (error) {
       console.error("Cortex Ingest failed", error);
       return {
-        content: [{ type: "text", text: `Error: Could not connect to Cortex Core Rust Engine on ${CORTEX_URL}.` }]
+        content: [{ type: "text", text: `Error: Could not connect to Cortex Core Rust Engine on ${CORTEX_URL}. Ensure cortex-core is running.` }]
+      };
+    }
+  }
+);
+
+// Create a tool to publish collective knowledge to the global mesh
+server.tool(
+  "publish_to_global_mesh",
+  "Publish verified architecture rules or shared knowledge into the global decentralized mesh (cortex://global).",
+  {
+    nodes: z.array(z.any()).describe("List of memory nodes to publish to global mesh"),
+    edges: z.array(z.any()).describe("List of relational edges connecting nodes")
+  },
+  async ({ nodes, edges }) => {
+    try {
+      const response = await fetch(`${CORTEX_URL}/v1/mesh/publish`, {
+        method: "POST",
+        headers: getHeaders(),
+        body: JSON.stringify({ nodes, edges })
+      });
+      const data = await response.json();
+      return {
+        content: [{ type: "text", text: `Successfully published to Global Mesh: ${data.message || 'Published.'}` }]
+      };
+    } catch (error) {
+      console.error("Global mesh publish failed", error);
+      return {
+        content: [{ type: "text", text: `Error: Could not connect to Cortex Core on ${CORTEX_URL}.` }]
       };
     }
   }
@@ -121,3 +150,4 @@ run().catch((error) => {
   console.error("Fatal error starting Cortex MCP server:", error);
   process.exit(1);
 });
+

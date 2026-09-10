@@ -18,6 +18,7 @@ use anyhow::Result;
 
 use crate::ai::openrouter::OpenRouterClient;
 use crate::engine::decay::DecayEngine;
+use crate::engine::crawler::{CrawlerEngine, CrawlerConfig};
 use crate::engine::overwrite::StateOverwriteEngine;
 use crate::storage::graph_db::GraphMemory;
 use crate::storage::vector_db::VectorIndex;
@@ -30,6 +31,7 @@ pub struct AppState {
     pub vector: Option<Arc<VectorIndex>>,
     pub working: Option<Arc<WorkingMemory>>,
     pub openrouter: Option<Arc<OpenRouterClient>>,
+    pub crawler: Arc<tokio::sync::Mutex<CrawlerEngine>>,
     pub decay: Arc<DecayEngine>,
     pub overwrite: Arc<StateOverwriteEngine>,
     pub ws_tx: broadcast::Sender<String>,
@@ -123,6 +125,7 @@ pub async fn start_server(port: u16, state: AppState) -> Result<()> {
         .route("/v1/sweep", post(trigger_sweep))
         .route("/v1/resolve", get(resolve_uri))
         .route("/v1/mesh/publish", post(publish_to_mesh_endpoint))
+        .route("/v1/crawler/config", post(configure_crawler))
         .route("/ws", get(ws_handler))
         .layer(cors)
         .with_state(state);
@@ -228,6 +231,25 @@ async fn publish_to_mesh_endpoint(
     })
 }
 
+/// Configure the background autonomous crawler
+async fn configure_crawler(
+    State(state): State<AppState>,
+    Json(payload): Json<CrawlerConfig>,
+) -> impl IntoResponse {
+    let mut crawler = state.crawler.lock().await;
+    if let Err(e) = crawler.update_config(payload) {
+        return Json(MeshPublishResponse {
+            success: false,
+            message: format!("Failed to configure crawler: {}", e),
+        });
+    }
+
+    Json(MeshPublishResponse {
+        success: true,
+        message: "Crawler successfully attached to directories in No-AI mode".to_string(),
+    })
+}
+
 #[derive(Deserialize)]
 pub struct InjectRequest {
     pub uri: String,
@@ -276,7 +298,7 @@ async fn recall_context(
     // 1. Vector similarity search: map prompt to candidate node IDs
     let mut candidate_ids = Vec::new();
     if let Some(ref vector) = state.vector {
-        let query_vec = vector.embed_text(&payload.prompt);
+        let query_vec = vector.embed_text_semantic(&payload.prompt).await;
         if let Ok(node_ids) = vector.map_to_node(query_vec, 5).await {
             candidate_ids.extend(node_ids);
         }
@@ -512,8 +534,8 @@ async fn ingest_internal(
 
             // Upsert vector embeddings for semantic lookup
             if let Some(ref vector) = state.vector {
-                let s_vec = vector.embed_text(&subject_node.label);
-                let o_vec = vector.embed_text(&object_node.label);
+                let s_vec = vector.embed_text_semantic(&subject_node.label).await;
+                let o_vec = vector.embed_text_semantic(&object_node.label).await;
                 let _ = vector.upsert_mapping(&subject_node.id, s_vec).await;
                 let _ = vector.upsert_mapping(&object_node.id, o_vec).await;
             }
