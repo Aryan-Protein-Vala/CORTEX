@@ -2,8 +2,10 @@
 
 import { useRef, useMemo, useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { OrbitControls, Html, Float, Stars } from '@react-three/drei'
+import { core, describeFailure, type EdgeDto, type MemoryDto } from '@/lib/core'
+import { useCore } from '@/lib/use-core'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { OrbitControls, Html, Float } from '@react-three/drei'
 import * as THREE from 'three'
 import { ArrowLeft } from 'lucide-react'
 
@@ -14,35 +16,107 @@ interface NeuronData {
   retention: number
   locked: boolean
   isGlobal: boolean
+  impact: number
+  provenance: string
+  accessCount: number
+  fading: boolean
 }
 
+/**
+ * Opt-in demo graph (`?demo=1`) for screenshots and the marketing page. It is
+ * typed as the real DTOs on purpose — when the core's shape changes, this fails
+ * to compile instead of quietly drifting, which is exactly what happened to the
+ * hand-written constants it replaces.
+ */
+const DEMO_NODES: MemoryDto[] = [
+  ['surrealdb', 'SurrealDB', 0.98, true, false, 9],
+  ['postgres', 'PostgreSQL', 0.88, false, false, 7],
+  ['tailwind', 'Tailwind v4', 0.99, true, false, 8],
+  ['hono', 'Hono API', 0.72, false, false, 6],
+  ['jwt', 'RS256 JWT', 0.91, true, false, 10],
+  ['mongodb', 'MongoDB (dead)', 0.18, false, false, 2],
+  ['mysql', 'Raw MySQL (dead)', 0.09, false, false, 2],
+  ['react19', 'React 19 Actions', 0.99, true, true, 8],
+  ['qdrant', 'Qdrant Vectors', 0.95, false, true, 6],
+].map(([id, label, retention, locked, isGlobal, impact]) => ({
+  id: String(id),
+  label: String(label),
+  category: 'concept',
+  impact: Number(impact),
+  stability: 1.4,
+  weight_hint: Number(retention),
+  locked: Boolean(locked),
+  fading: Number(retention) < 0.35,
+  retention: Number(retention),
+  owner_uri: isGlobal ? 'cortex://global' : 'cortex://default',
+  provenance: 'demo',
+  access_count: 3,
+  last_accessed: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+})) as MemoryDto[]
+
+const DEMO_EDGES: EdgeDto[] = [
+  ['surrealdb', 'postgres', false],
+  ['surrealdb', 'hono', false],
+  ['tailwind', 'react19', false],
+  ['hono', 'jwt', false],
+  ['surrealdb', 'mongodb', true],
+  ['postgres', 'mysql', true],
+  ['surrealdb', 'qdrant', false],
+].map(([source, target, historical]) => ({
+  id: `edge:${source}-${historical ? 'was' : 'relates_to'}-${target}`,
+  source: String(source),
+  target: String(target),
+  predicate: historical ? 'was_used' : 'relates_to',
+  weight: historical ? 0 : 0.85,
+  is_historical: Boolean(historical),
+  impact: 5,
+  locked: false,
+}))
+
+/** Scene-local edge shape: the canvas only needs endpoints + a colour hint. */
 interface EdgeData {
   source: string
   target: string
   historical: boolean
 }
 
-const DEMO_NEURONS: NeuronData[] = [
-  { id: 'surrealdb', label: 'SurrealDB', position: [0, 1, 0], retention: 0.98, locked: true, isGlobal: false },
-  { id: 'postgres', label: 'PostgreSQL', position: [-2, -0.5, 1], retention: 0.88, locked: false, isGlobal: false },
-  { id: 'tailwind', label: 'Tailwind v4', position: [2.5, 0.8, -0.5], retention: 0.99, locked: true, isGlobal: false },
-  { id: 'hono', label: 'Hono API', position: [1, -1.5, 2], retention: 0.72, locked: false, isGlobal: false },
-  { id: 'jwt', label: 'RS256 JWT', position: [3, -0.3, 1.5], retention: 0.91, locked: true, isGlobal: false },
-  { id: 'mongodb', label: 'MongoDB (Dead)', position: [-3, 2, -1], retention: 0.18, locked: false, isGlobal: false },
-  { id: 'mysql', label: 'Raw MySQL (RIP)', position: [-2.5, -2, -2], retention: 0.09, locked: false, isGlobal: false },
-  { id: 'react19', label: 'React 19 Actions', position: [4, 1.5, -1], retention: 0.99, locked: true, isGlobal: true },
-  { id: 'qdrant', label: 'Qdrant Vectors', position: [3.5, -1.8, -0.5], retention: 0.95, locked: false, isGlobal: true },
-]
+function positionFor(index: number, total: number): [number, number, number] {
+  // Fibonacci sphere: deterministic, and keeps 300 nodes legible instead of
+  // stacking them on a plane the way the hardcoded positions did.
+  const radius = total <= 12 ? 3.4 : Math.min(9, 3.4 + Math.sqrt(total) * 0.42)
+  const golden = Math.PI * (3 - Math.sqrt(5))
+  const y = 1 - (index / Math.max(1, total - 1)) * 2
+  const ring = Math.sqrt(Math.max(0, 1 - y * y))
+  const theta = golden * index
+  return [Math.cos(theta) * ring * radius, y * radius * 0.72, Math.sin(theta) * ring * radius]
+}
 
-const DEMO_EDGES: EdgeData[] = [
-  { source: 'surrealdb', target: 'postgres', historical: false },
-  { source: 'surrealdb', target: 'hono', historical: false },
-  { source: 'tailwind', target: 'react19', historical: false },
-  { source: 'hono', target: 'jwt', historical: false },
-  { source: 'surrealdb', target: 'mongodb', historical: true },
-  { source: 'postgres', target: 'mysql', historical: true },
-  { source: 'surrealdb', target: 'qdrant', historical: false },
-]
+function toNeurons(nodes: MemoryDto[]): NeuronData[] {
+  const ranked = nodes
+    .slice()
+    .sort((a, b) => b.impact * 10 + b.retention * 6 - (a.impact * 10 + a.retention * 6))
+    .slice(0, 400)
+  return ranked.map((node, index) => ({
+    id: node.id,
+    label: node.label,
+    position: positionFor(index, ranked.length),
+    retention: node.retention,
+    locked: node.locked,
+    isGlobal: node.owner_uri === 'cortex://global',
+    impact: node.impact,
+    provenance: node.provenance || 'unknown',
+    accessCount: node.access_count,
+    fading: node.fading,
+  }))
+}
+
+function toEdges(edges: EdgeDto[] | undefined, visible: Set<string>): EdgeData[] {
+  return (edges ?? [])
+    .filter((edge) => visible.has(edge.source) && visible.has(edge.target) && !edge.is_historical)
+    .slice(0, 900)
+    .map((edge) => ({ source: edge.source, target: edge.target, historical: edge.is_historical }))
+}
 
 function Neuron({ data, onClick }: { data: NeuronData; onClick: (n: NeuronData) => void }) {
   const meshRef = useRef<THREE.Mesh>(null)
@@ -129,7 +203,6 @@ function Neuron({ data, onClick }: { data: NeuronData; onClick: (n: NeuronData) 
 }
 
 function SynapticEdge({ sourcePos, targetPos, historical }: { sourcePos: [number, number, number]; targetPos: [number, number, number]; historical: boolean }) {
-  const lineRef = useRef<THREE.Line>(null)
 
   const points = useMemo(() => {
     const start = new THREE.Vector3(...sourcePos)
@@ -140,18 +213,27 @@ function SynapticEdge({ sourcePos, targetPos, historical }: { sourcePos: [number
     return curve.getPoints(30)
   }, [sourcePos, targetPos])
 
-  const geometry = useMemo(() => new THREE.BufferGeometry().setFromPoints(points), [points])
+  const line = useMemo(() => {
+    const geometry = new THREE.BufferGeometry().setFromPoints(points)
+    const material = new THREE.LineBasicMaterial({
+      color: historical ? '#334155' : '#06b6d4',
+      transparent: true,
+      opacity: historical ? 0.15 : 0.4,
+    })
+    return new THREE.Line(geometry, material)
+  }, [points, historical])
 
-  return (
-    <line ref={lineRef} geometry={geometry}>
-      <lineBasicMaterial
-        color={historical ? '#334155' : '#06b6d4'}
-        transparent
-        opacity={historical ? 0.15 : 0.4}
-        linewidth={1}
-      />
-    </line>
+  // R3F v9 + React 19 collide on the `line` JSX intrinsic (SVG's line), so the
+  // object is built explicitly and handed to <primitive>. Also gives us a place
+  // to dispose GPU resources when a node leaves the graph.
+  useEffect(
+    () => () => {
+      line.geometry.dispose()
+      ;(line.material as THREE.Material).dispose()
+    },
+    [line]
   )
+  return <primitive object={line} />
 }
 
 function ElectricalPulse({ sourcePos, targetPos }: { sourcePos: [number, number, number]; targetPos: [number, number, number] }) {
@@ -229,16 +311,119 @@ function Scene({ neurons, edges, onSelectNeuron }: { neurons: NeuronData[]; edge
 }
 
 export default function BrainPage() {
-  const [selectedNeuron, setSelectedNeuron] = useState<NeuronData | null>(null)
-  const [neurons] = useState<NeuronData[]>(DEMO_NEURONS)
-  const [edges] = useState<EdgeData[]>(DEMO_EDGES)
+  const { state, stats, memories, message, refresh } = useCore({ intervalMs: 30_000, memoryLimit: 400 })
+  const [demoMode, setDemoMode] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [action, setAction] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    // window.location rather than useSearchParams: keeps this page prerenderable
+    // without a Suspense boundary just for a screenshot flag.
+    if (typeof window !== 'undefined' && new URL(window.location.href).searchParams.get('demo') === '1') {
+      setDemoMode(true)
+    }
+  }, [])
+
+  const { neurons, edges } = useMemo(() => {
+    if (demoMode) {
+      const nodes = toNeurons(DEMO_NODES)
+      return { neurons: nodes, edges: toEdges(DEMO_EDGES, new Set(nodes.map((n) => n.id))) }
+    }
+    const nodes = toNeurons(memories?.memories ?? [])
+    return { neurons: nodes, edges: toEdges(memories?.edges, new Set(nodes.map((n) => n.id))) }
+  }, [demoMode, memories])
+
+  const selectedNeuron = useMemo(() => neurons.find((n) => n.id === selectedId) ?? null, [neurons, selectedId])
+
+  const act = useCallback(
+    async (kind: 'lock' | 'forget') => {
+      if (!selectedNeuron || demoMode) return
+      setBusy(true)
+      setAction(null)
+      const result =
+        kind === 'lock'
+          ? await core.lock(selectedNeuron.id, !selectedNeuron.locked)
+          : await core.forget(selectedNeuron.id)
+      setBusy(false)
+      if (!result.ok) {
+        setAction(describeFailure(result))
+        return
+      }
+      setAction(kind === 'lock' ? (selectedNeuron.locked ? 'Unlocked — decay can fade it again' : 'Locked — exempt from decay forever') : `Forgot “${selectedNeuron.label}” and its edges`)
+      if (kind === 'forget') setSelectedId(null)
+      await refresh()
+    },
+    [selectedNeuron, demoMode, refresh]
+  )
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--background)' }}>
-      {/* The 3D Canvas — fills the entire main dashboard area */}
       <Canvas camera={{ position: [0, 2, 8], fov: 50 }} style={{ width: '100%', height: '100%' }}>
-        <Scene neurons={neurons} edges={edges} onSelectNeuron={setSelectedNeuron} />
+        <Scene neurons={neurons} edges={edges} onSelectNeuron={(n) => setSelectedId(n.id)} />
       </Canvas>
+
+      {/* Top-left status: what am I looking at, and is it my data? */}
+      <div
+        style={{
+          position: 'absolute', top: 24, left: 24, zIndex: 60, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start',
+        }}
+      >
+        <Link href="/dashboard" className="button small ghost" style={{ gap: 8 }}>
+          <ArrowLeft size={14} /> Feed
+        </Link>
+        <span className="core-pill" style={{ background: 'var(--surface)' }}>
+          <i />
+          {demoMode
+            ? 'DEMO GRAPH — not your data'
+            : state === 'loading'
+              ? 'LOADING GRAPH…'
+              : state === 'offline' || state === 'denied' || state === 'error'
+                ? 'CORE NOT REACHABLE'
+                : `${neurons.length} NEURONS · ${edges.length} ACTIVE SYNAPSES`}
+        </span>
+        {demoMode ? (
+          <span className="data-flag">remove ?demo=1 to view your real graph</span>
+        ) : null}
+      </div>
+
+      {(state === 'offline' || state === 'denied' || state === 'error') && !demoMode ? (
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 70, width: 'min(560px,90vw)' }}>
+          <div className="state-card">
+            <h3>This is your graph, so it is empty until the core answers</h3>
+            <p>{message || 'The 3D view reads /v1/memories through the site’s proxy. Nothing is simulated here.'}</p>
+            <div className="row">
+              <button type="button" className="button small" onClick={() => void refresh()}>
+                Retry
+              </button>
+              <Link href="/dashboard/docs" className="button small ghost">
+                Setup docs
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {state === 'empty' && !demoMode ? (
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 70, width: 'min(520px,90vw)' }}>
+          <div className="state-card">
+            <h3>No memories yet — the space you are looking at is honest</h3>
+            <p>
+              Store a fact from the feed, the MCP <code>cortex_remember</code> tool or the browser extension and it
+              appears here on the next poll. For a screenshot of what this looks like populated, open{' '}
+              <Link href="/dashboard/brain?demo=1" style={{ color: 'var(--accent)' }}>
+                the demo graph
+              </Link>
+              .
+            </p>
+            <div className="row">
+              <Link href="/dashboard" className="button small">
+                Go to the feed
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Floating title */}
       <div style={{
@@ -249,7 +434,7 @@ export default function BrainPage() {
         font: '11px monospace', color: 'var(--secondary)', letterSpacing: '.12em'
       }}>
         <span style={{ color: 'var(--accent)', marginRight: '8px' }}>●</span>
-        3D HIVE MIND • DRAG TO ORBIT
+        3D HIVE MIND • DRAG TO ORBIT{stats ? ` • ${stats.nodes} NODES TOTAL` : ''}
       </div>
 
       {/* Neuron Inspector (floating bottom-left) */}
@@ -262,14 +447,13 @@ export default function BrainPage() {
           color: 'var(--foreground)',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, font: '11px monospace', letterSpacing: '.1em' }}>
-            <span style={{ color: 'var(--secondary)' }}>{selectedNeuron.isGlobal ? 'cortex://global' : 'cortex://user'}</span>
+            <span style={{ color: 'var(--secondary)' }}>{selectedNeuron.isGlobal ? 'cortex://global' : 'your namespace'}</span>
             <span style={{ color: selectedNeuron.locked ? 'var(--accent)' : '#06b6d4' }}>
               {selectedNeuron.locked ? '🔒 AMYGDALA LOCK' : '⚡ DYNAMIC'}
             </span>
           </div>
           <h3 style={{ margin: '0 0 16px', fontSize: 24, fontWeight: 800, letterSpacing: '-.05em' }}>{selectedNeuron.label}</h3>
 
-          {/* Retention bar */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', font: '10px monospace', marginBottom: 6 }}>
               <span style={{ color: 'var(--secondary)' }}>RETENTION (R)</span>
@@ -284,8 +468,36 @@ export default function BrainPage() {
             </div>
           </div>
 
+          <p style={{ margin: '0 0 14px', font: '10px monospace', color: 'var(--secondary)', letterSpacing: '.06em' }}>
+            IMPACT {selectedNeuron.impact}/10 · SEEN {selectedNeuron.accessCount}× · FROM {selectedNeuron.provenance.toUpperCase()}
+            {selectedNeuron.fading ? ' · FADING' : ''}
+          </p>
+
+          {!demoMode ? (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <button
+                type="button"
+                onClick={() => void act('lock')}
+                disabled={busy}
+                style={{ flex: 1, padding: '11px 0', border: '1px solid var(--border)', background: 'transparent', color: 'var(--foreground)', cursor: 'pointer', font: '11px monospace', letterSpacing: '.08em' }}
+              >
+                {busy ? 'WORKING…' : selectedNeuron.locked ? 'UNLOCK' : 'LOCK (NO DECAY)'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void act('forget')}
+                disabled={busy}
+                style={{ flex: 1, padding: '11px 0', border: '1px solid #dc262655', background: 'transparent', color: '#dc2626', cursor: 'pointer', font: '11px monospace', letterSpacing: '.08em' }}
+              >
+                FORGET
+              </button>
+            </div>
+          ) : null}
+
+          {action ? <p style={{ margin: '0 0 10px', font: '10px monospace', color: 'var(--accent)' }}>{action}</p> : null}
+
           <button
-            onClick={() => setSelectedNeuron(null)}
+            onClick={() => setSelectedId(null)}
             style={{
               width: '100%', marginTop: 8, padding: '12px 0',
               border: '1px solid var(--border)', background: 'transparent',

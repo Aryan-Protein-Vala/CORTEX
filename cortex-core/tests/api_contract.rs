@@ -359,10 +359,16 @@ async fn a_keyed_server_refuses_anonymous_and_wrong_keys() {
     let health = response_json(response).await;
     assert_eq!(health["status"], "ok");
     assert_eq!(
-        health["cloud_sync"].as_bool(),
+        health["services"]["cloud_sync"].as_bool(),
         Some(false),
         "health must not claim cloud sync: {health}"
     );
+    assert_eq!(
+        health["services"]["extraction"].as_bool(),
+        Some(false),
+        "no OPENROUTER_API_KEY is set in tests, so extraction must read as off"
+    );
+    assert_eq!(health["backend"], "file");
 
     let response = router
         .clone()

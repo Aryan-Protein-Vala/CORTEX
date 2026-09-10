@@ -1,21 +1,51 @@
 {
   "name": "cortex-js",
-  "version": "1.0.0",
-  "description": "",
-  "main": "dist/index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsup && tsc --emitDeclarationOnly"
+  "version": "1.1.0",
+  "description": "CORTEX core client for TypeScript and JavaScript: remember(), recall(), and the cortex:// graph resolver.",
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18.17"
+  },
+  "keywords": [
+    "cortex",
+    "memory",
+    "knowledge-graph",
+    "mcp",
+    "llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aryan-Protein-Vala/CORTEX.git",
+    "directory": "cortex-js"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/test-client.mjs",
+    "check": "npm run typecheck && npm test",
+    "prepublishOnly": "npm run check && npm run build"
+  },
   "devDependencies": {
     "@types/node": "^22.20.2",
     "tsup": "^8.5.1",
     "typescript": "^7.0.2"
-  },
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts"
+  }
 }

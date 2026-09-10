@@ -100,7 +100,16 @@ const server = http.createServer((req, res) => {
     const body = raw ? JSON.parse(raw) : {};
 
     if (url.pathname === "/health") {
-      return json(res, 200, { status: "ok", backend: "file", nodes: nodes.size, edges: edges.size, cloud_sync: false, vector_accelerator: false });
+      return json(res, 200, {
+        status: "ok",
+        version: "smoke",
+        uptime_secs: 12,
+        backend: "file",
+        decay_policy: "soft",
+        authenticated: true,
+        services: { graph: true, extraction: false, vector_accelerator: false, sessions: true, cloud_sync: false },
+        counts: { nodes: nodes.size, edges: edges.size, pending_jobs: 0, buffered_sessions: sessions.size },
+      });
     }
     if (url.pathname === "/v1/stats") {
       return json(res, 200, { version: "smoke", backend: "file", decay_policy: "soft", nodes: nodes.size, edges: edges.size, locked: 0, fading: 0, historical: 0, avg_retention: 1, by_category: {}, by_provenance: {}, top_labels: [...nodes.values()].slice(0, 5).map((n) => n.label), full_graph_token_estimate: nodes.size * 12 });
@@ -166,7 +175,11 @@ const server = http.createServer((req, res) => {
       const q = (url.searchParams.get("q") || "").toLowerCase();
       let list = [...nodes.values()].filter((n) => n.owner_uri === (url.searchParams.get("owner") || OWNER));
       if (q) list = list.filter((n) => n.label.toLowerCase().includes(q));
-      return json(res, 200, { owner_uri: OWNER, total: list.length, returned: list.length, memories: list, edges: [] });
+      // The real handler returns the edges between the returned nodes, which is
+      // what makes neighbourhood expansion possible without a graph query.
+      const ids = new Set(list.map((n) => n.id));
+      const pageEdges = [...edges.values()].filter((e) => ids.has(e.source) && ids.has(e.target));
+      return json(res, 200, { owner_uri: OWNER, total: list.length, returned: list.length, memories: list, edges: pageEdges });
     }
     const del = url.pathname.match(/^\/v1\/memories\/(.+)$/);
     if (del && req.method === "DELETE") {
@@ -315,7 +328,8 @@ child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initia
 
 const tools = await call("tools/list", {});
 const names = tools.result.tools.map((t) => t.name);
-assert("every tool is registered", names.length >= 8, names);
+assert("every tool is registered", names.length >= 9, names);
+assert("a destructive tool is marked destructive", tools.result.tools.find((t) => t.name === "cortex_forget").annotations?.destructiveHint === true, names);
 assert("tools carry descriptions the model can act on", tools.result.tools.every((t) => (t.description || "").length > 40), names);
 assert("recall is described as a pre-answer step", /before answering/i.test(tools.result.tools.find((t) => t.name === "cortex_recall").description));
 
@@ -371,6 +385,35 @@ value = payload(result);
 assert("traversal attempts are dropped, not read", value.ingested === undefined || value.ingested === 0, value);
 
 // status + honest mesh refusal
+// A fact created for this check, so it does not depend on another assertion's leftovers.
+result = await call("tools/call", { name: "cortex_remember", arguments: { fact: "always use pnpm in CI", impact: 10 } });
+value = payload(result);
+assert("an explicit rule is remembered", value.remembered === true, value);
+
+result = await call("tools/call", { name: "cortex_lock", arguments: { label: "use pnpm in CI", locked: true } });
+value = payload(result);
+assert("lock accepts a label, not only an id", value.locked === true && value.id === "node:use pnpm in ci", value);
+
+result = await call("tools/call", { name: "cortex_lock", arguments: { label: "does-not-exist-at-all" } });
+value = payload(result);
+assert("lock on a miss says so without touching anything", value.locked === false && /no memory/i.test(String(value.message)), value);
+
+result = await call("tools/call", { name: "cortex_lock", arguments: { node_id: "node:not-real" } });
+value = result?.result ?? result;
+assert("locking an invented id surfaces the core's 404", value.isError === true && /not_found/.test(JSON.stringify(value)), value);
+
+result = await call("tools/call", { name: "cortex_expand", arguments: { label: "User" } });
+value = payload(result);
+assert(
+  "expand returns the neighbourhood around a memory",
+  value.found === true && Array.isArray(value.neighbours) && value.neighbours.length >= 1 && value.memory?.label === "User",
+  value
+);
+
+result = await call("tools/call", { name: "cortex_expand", arguments: {} });
+value = result?.result ?? result;
+assert("expand refuses to guess a target", value.isError === true && /node_id or label/.test(JSON.stringify(value)), value);
+
 result = await call("tools/call", { name: "cortex_status", arguments: {} });
 value = payload(result);
 assert("status reports reachability and config", value.reachable === true && value.core_url.includes(String(PORT)), value);

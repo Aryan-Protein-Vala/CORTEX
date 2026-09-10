@@ -12,16 +12,26 @@ next week:  cortex_recall before answering  →  the rule comes back in ~40 toke
 
 ## What you get
 
+Nine tools. Two of them (`cortex_forget`, `cortex_lock`) accept a label instead of
+an opaque id, because that is what a model actually knows; an ambiguous label is
+reported rather than guessed.
+
 | Tool | Purpose |
 | --- | --- |
 | `cortex_recall` | Budgeted briefing of the facts/rules that apply to the current question. Call it before answering anything about their stack or project. |
 | `cortex_remember` | Store one durable fact. Waits for the engine and reports how many triplets/nodes/edges were created — or that nothing was durable enough to store. |
 | `cortex_remember_turn` | Buffer a conversation turn (user *or* assistant). Extraction runs once per session, not once per message. |
 | `cortex_resolve` | Read a whole `cortex://` namespace as a JSON-LD packet. |
-| `cortex_forget` | Delete one node and the edges that referenced it. |
-| `cortex_lock` | Pin a memory so the decay sweep can never fade or prune it. |
+| `cortex_forget` | Delete one node and the edges that referenced it, by `node_id` or exact `label`. Marked `destructiveHint`, so clients can ask first. |
+| `cortex_lock` | Pin (or unpin) a memory so the decay sweep can never fade it — by `node_id` or `label`. |
+| `cortex_expand` | One memory plus the edges and neighbours around it: the local graph, when a briefing names something whose relationships matter. |
 | `cortex_ingest_project_files` | Extract conventions from `AGENTS.md`/`README.md`/manifests — only inside `CORTEX_READ_DIRS`, never a symlink escape, secrets redacted on read. |
 | `cortex_status` | Reachability, backend, counts and resolved config. Paste this when something looks broken. |
+
+No tool ever returns a success it did not get: a core that is down, a key that was
+rejected, a 404 on an invented id and an ambiguous label all come back as `isError`
+or an explicit `found: false`, so the model says "I could not reach memory" instead
+of inventing one.
 
 Plus two resources (`cortex://profile`, `cortex://stats`) and server
 `instructions`, which is what actually makes a capable client call `recall`

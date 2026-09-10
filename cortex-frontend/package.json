@@ -4,8 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:mock": "node scripts/dev-mock.mjs",
+    "mock-core": "node scripts/mock-core.mjs",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/test-hydrate.mjs",
+    "verify": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

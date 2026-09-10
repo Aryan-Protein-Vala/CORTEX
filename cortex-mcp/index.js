@@ -166,6 +166,39 @@ function summarizeRecall(data) {
 }
 
 // ---------------------------------------------------------------------------
+// Label → id resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Models do not carry opaque ids around; they remember what a fact was about.
+ * Every destructive tool therefore accepts a label as well, resolved against the
+ * owner's own memory list (`/v1/memories?q=`), and refuses to act on a fuzzy
+ * match when several nodes could have been meant.
+ */
+async function findNode({ node_id, label, uri }) {
+  const owner = uri || OWNER;
+  if (node_id) {
+    const list = await core("/v1/memories", { method: "GET", query: { owner, limit: 2000 } });
+    const hit = (list.memories ?? []).find((n) => n.id === node_id);
+    return hit ?? { id: node_id, label: node_id, unresolved: true };
+  }
+  if (!label) return null;
+  const list = await core("/v1/memories", { method: "GET", query: { owner, q: label, limit: 2000 } });
+  const exact = (list.memories ?? []).filter((n) => (n.label || "").toLowerCase() === String(label).toLowerCase());
+  if (exact.length === 1) return exact[0];
+  const candidates = exact.length ? exact : (list.memories ?? []).slice(0, 5);
+  if (!candidates.length) return null;
+  const error = new CoreError(
+    `"${label}" matches ${candidates.length} memories in ${owner}, so nothing was changed.`,
+    {
+      code: "ambiguous_label",
+      hint: `Pass node_id instead. Candidates: ${candidates.map((c) => `${c.label} (${c.id})`).join(", ")}`,
+    }
+  );
+  throw error;
+}
+
+// ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
 
@@ -179,6 +212,8 @@ const server = new McpServer(
       "Before answering anything about their stack, preferences, project rules, past decisions or identity, call `cortex_recall` with the question and honour what comes back.",
       "When the user states a durable fact, preference, correction or rule (\"always/never ...\"), call `cortex_remember` in the same turn. Do not store secrets, tokens, passwords or private third-party data.",
       "Use `cortex_forget` when the user says a memory is wrong or stale, and `cortex_lock` for rules that must never be forgotten.",
+      "When a briefing names a concept the task hinges on, `cortex_expand` returns that memory's edges and neighbours — the graph, not just the line.",
+      "Forgets and locks accept a label or a node_id; an ambiguous label is reported instead of guessed.",
       "The tools are best-effort: if a call fails, continue the task and mention the failure once.",
     ].join(" "),
   }
@@ -391,14 +426,81 @@ server.registerTool(
     description:
       "Pin or unpin a memory so the decay sweep can never fade or prune it. Use for permanent identity facts and hard project rules the user asked to keep forever.",
     inputSchema: {
-      node_id: z.string().describe("Node id to lock or unlock."),
+      node_id: z.string().optional().describe("Node id to lock or unlock (takes precedence over label)."),
+      label: z.string().optional().describe("Exact memory label, e.g. 'use pnpm in CI', when the id is unknown."),
       locked: z.boolean().default(true).describe("true = protected from decay, false = allow it to fade normally."),
     },
+    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: false },
   },
-  async ({ node_id, locked }) => {
+  async ({ node_id, label, locked }) => {
     try {
-      const result = await core(`/v1/memories/${encodeURIComponent(node_id)}/lock`, { body: { locked } });
-      return text({ locked: !!result.locked, id: result.id ?? node_id, label: result.label });
+      if (!node_id && !label) return fail(new CoreError("provide node_id or label", { code: "bad_request" }));
+      const node = await findNode({ node_id, label });
+      if (!node) return text({ locked: false, message: `no memory labelled "${label}" under ${OWNER}` });
+      const result = await core(`/v1/memories/${encodeURIComponent(node.id)}/lock`, { body: { locked } });
+      return text({
+        locked: result.locked ?? !!locked,
+        id: node.id,
+        label: result.label ?? node.label,
+        note: locked
+          ? "Exempt from decay from now on; recall always keeps it within budget."
+          : "Decay can fade this again. It is not deleted, only deprioritised.",
+      });
+    } catch (error) {
+      return fail(error);
+    }
+  }
+);
+
+server.registerTool(
+  "cortex_expand",
+  {
+    title: "Expand a memory",
+    description:
+      "Return one memory plus the edges and neighbouring memories that connect to it — the local graph around a concept. Use after a recall names something whose relationships matter (a dependency, a superseded choice, a rule that points at another rule).",
+    inputSchema: {
+      node_id: z.string().optional().describe("Node id from a recall result."),
+      label: z.string().optional().describe("Exact memory label when the id is unknown."),
+      uri: z.string().optional().describe("Namespace to read, e.g. cortex://team_eng."),
+      max_neighbours: z.number().int().min(1).max(60).optional().describe("How many neighbours to include (default 12)."),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  async ({ node_id, label, uri, max_neighbours }) => {
+    try {
+      if (!node_id && !label) return fail(new CoreError("provide node_id or label", { code: "bad_request" }));
+      const owner = uri || OWNER;
+      const node = await findNode({ node_id, label, uri: owner });
+      if (!node) return text({ found: false, message: `no memory matched "${label}" in ${owner}` });
+      // One page of the graph, adjacency computed locally: the core exposes the
+      // node list and its edges, which is everything a neighbourhood needs.
+      const list = await core("/v1/memories", { method: "GET", query: { owner, limit: 2000, include_mesh: includeMeshFor(uri) } });
+      const byId = new Map((list.memories ?? []).map((n) => [n.id, n]));
+      const touching = (list.edges ?? []).filter((e) => e.source === node.id || e.target === node.id);
+      const limit = max_neighbours ?? 12;
+      const neighbours = [];
+      for (const edge of touching) {
+        const otherId = edge.source === node.id ? edge.target : edge.source;
+        const other = byId.get(otherId);
+        neighbours.push({
+          relation: edge.source === node.id ? edge.predicate : `${edge.predicate} (reverse)`,
+          weight: edge.weight,
+          historical: !!edge.is_historical,
+          memory: other
+            ? { id: other.id, label: other.label, impact: other.impact, retention: Number((other.retention ?? 0).toFixed(3)), locked: !!other.locked }
+            : { id: otherId, label: "(outside the returned page)" },
+        });
+        if (neighbours.length >= limit) break;
+      }
+      const merged = new Map();
+      for (const item of neighbours) merged.set(item.memory.id, item);
+      return text({
+        found: true,
+        memory: byId.get(node.id) ?? node,
+        edges: touching.length,
+        truncated_by_page: (list.total ?? 0) > (list.returned ?? 0),
+        neighbours: [...merged.values()],
+      });
     } catch (error) {
       return fail(error);
     }
@@ -489,6 +591,10 @@ server.registerTool(
     }
   }
 );
+
+function includeMeshFor(uri) {
+  return uri && uri !== OWNER ? true : INCLUDE_MESH;
+}
 
 function isPlainFileName(name) {
   return typeof name === "string" && !name.includes("/") && !name.includes("\\") && !name.includes("..") && name.length <= 64;
