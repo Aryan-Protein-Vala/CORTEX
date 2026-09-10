@@ -140,10 +140,15 @@ Re-run everything with the commands in `AGENTS.md`.
    merge semantics mirror the bash version and the JSON handling is deliberately conservative
    (`ConvertFrom-Json`, BOM-less UTF-8, refuse-on-parse-error), but treat the first Windows run as
    a test: check the backup file appears and the other servers survive.
-4. **No CI run has happened yet.** The workflow was authored blind (parsed with a YAML loader,
-   only official actions, every step mapped to a suite that exists). After pushing this branch,
-   start it with:
-   `gh workflow run ci.yml --ref arena/01a08ac5-cortex`
+4. **No CI run has happened yet, and this branch is not on GitHub.** The workflow was authored
+   blind (parsed with a YAML loader, only official actions, every step mapped to a suite that
+   exists). The push failed in this environment: `gh auth status` reports the `GH_TOKEN` is no
+   longer valid, so all five commits of this cycle (`5298a59`, `0ba2c19`, `f7d537f`, `f5e245a`,
+   `2971eab`) exist only in the local clone. Once the GitHub connection is reconnected and the
+   branch is pushed, start the first run with:
+   `git push origin arena/01a08ac5-cortex && gh workflow run ci.yml --ref arena/01a08ac5-cortex`
+   Until that run is green, findings 1 and 2 above stay open in the honest sense: the Rust is
+   reviewed, not compiled, and CI itself is unproven.
 5. **Registry publishing is documented, not done.** `cortex-mcp` and `cortex-sdk` belong to other
    people; `cortex-js`, `cortex-py` and `cortex-core` names were checked as available but nothing
    was published (publishing needs accounts, 2FA and a decision about the `@cortex` scope).
