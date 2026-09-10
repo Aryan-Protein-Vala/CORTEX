@@ -57,16 +57,15 @@ export default function DocsPage() {
           <div className="step">
             <div className="step-marker">01</div>
             <div>
-              <p className="mono">THE ENGINE</p>
-              <h3>Start Cortex Core</h3>
-              <p>Initialize the Rust backend. This handles all embedding, graph traversal, and Ebbinghaus decay math.</p>
-              <CopyBlock code={`cd cortex-core\ncargo run`} />
+              <p className="mono">INSTALLATION</p>
+              <h3>Install Cortex CLI</h3>
+              <p>Download the Cortex engine locally. This runs the background Ebbinghaus decay math and syncs your IDEs.</p>
+              <CopyBlock code={`npm install -g @cortex/cli\ncortex login`} />
             </div>
             <div className="step-art" style={{ opacity: 1, paddingLeft: '40px' }}>
-              <div style={{ padding: '20px', border: '1px solid var(--border)', background: 'var(--surface)', font: '12px monospace' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#22c55e', marginBottom: '8px' }}><Check size={14} /> <span>Engine running on port 3030</span></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#22c55e', marginBottom: '8px' }}><Check size={14} /> <span>SurrealDB connected</span></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#22c55e' }}><Check size={14} /> <span>Qdrant vectors ready</span></div>
+              <div style={{ padding: '20px', border: '1px solid #333', background: '#111', font: '12px monospace' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#22c55e', marginBottom: '8px' }}><Check size={14} /> <span>CLI installed globally</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#22c55e' }}><Check size={14} /> <span>Authenticated securely</span></div>
               </div>
             </div>
           </div>
@@ -74,27 +73,19 @@ export default function DocsPage() {
           <div className="step">
             <div className="step-marker">02</div>
             <div>
-              <p className="mono">CURSOR / WINDSURF</p>
-              <h3>Attach the MCP Server</h3>
-              <p>Give your IDE a permanent memory. Add Cortex to your MCP settings (`~/.cursor/mcp.json`).</p>
-              <CopyBlock lang="json" code={`{
-  "mcpServers": {
-    "cortex": {
-      "command": "node",
-      "args": ["/path/to/cortex-mcp/index.js"],
-      "env": {
-        "CORTEX_API_URL": "http://localhost:3030"
-      }
-    }
-  }
-}`} />
+              <p className="mono">CHROME EXTENSION</p>
+              <h3>Add to Browser</h3>
+              <p>Get the official Chrome Extension to allow Cortex to seamlessly ingest information from ChatGPT, Claude, and your browsing sessions.</p>
+              <a href="#" style={{ display: 'inline-flex', marginTop: '20px', padding: '12px 24px', background: '#fff', color: '#000', borderRadius: '8px', textDecoration: 'none', fontWeight: 'bold', fontSize: '14px' }}>
+                Install from Chrome Web Store
+              </a>
             </div>
             <div className="step-art" style={{ opacity: 1, paddingLeft: '40px' }}>
-              <div style={{ padding: '20px', border: '1px dashed var(--accent)', background: 'color-mix(in srgb, var(--accent) 5%, transparent)' }}>
-                <p style={{ margin: '0 0 10px', fontWeight: 'bold', color: 'var(--foreground)' }}>Cursor Capabilities:</p>
-                <ul style={{ margin: 0, paddingLeft: '20px', font: '12px monospace', color: 'var(--secondary)' }}>
-                  <li style={{ marginBottom: '8px' }}><code>fetch_cortex_memory</code> (Context retrieval)</li>
-                  <li><code>store_cortex_memory</code> (Persist session facts)</li>
+              <div style={{ padding: '20px', border: '1px dashed #3b82f6', background: '#0f172a' }}>
+                <p style={{ margin: '0 0 10px', fontWeight: 'bold', color: '#fff' }}>Auto-Ingest Enabled For:</p>
+                <ul style={{ margin: 0, paddingLeft: '20px', font: '12px monospace', color: '#888' }}>
+                  <li style={{ marginBottom: '8px' }}>ChatGPT / Claude Web UIs</li>
+                  <li>Wikipedia / Documentation Sites</li>
                 </ul>
               </div>
             </div>
@@ -103,18 +94,20 @@ export default function DocsPage() {
           <div className="step">
             <div className="step-marker">03</div>
             <div>
-              <p className="mono">BROWSER EXTENSION</p>
-              <h3>Inject into Web UIs</h3>
-              <p>Load the unpacked `cortex-extension` folder in Chrome. It intercepts DOM mutations in ChatGPT/Claude and injects memory context.</p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginTop: '25px', font: '12px monospace', color: 'var(--secondary)' }}>
-                <span style={{ padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)' }}>Prompt</span>
+              <p className="mono">IDE INTEGRATION</p>
+              <h3>Connect Cursor / Windsurf</h3>
+              <p>Give your AI coding assistant permanent memory of your codebase conventions and rules by connecting the Cortex MCP Server.</p>
+              <CopyBlock code={`cortex mcp install cursor`} />
+            </div>
+            <div className="step-art" style={{ opacity: 1, paddingLeft: '40px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px', font: '12px monospace', color: '#888' }}>
+                <span style={{ padding: '8px 12px', background: '#111', border: '1px solid #333' }}>Cursor</span>
                 <ArrowRight size={12} />
-                <span style={{ padding: '8px 12px', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)', border: '1px solid var(--accent)' }}>Cortex Injection</span>
+                <span style={{ padding: '8px 12px', background: '#111', border: '1px solid #3b82f6', color: '#3b82f6' }}>Cortex MCP</span>
                 <ArrowRight size={12} />
-                <span style={{ padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)' }}>OpenAI</span>
+                <span style={{ padding: '8px 12px', background: '#111', border: '1px solid #333' }}>Hive Mind</span>
               </div>
             </div>
-            <div className="step-art" />
           </div>
 
         </div>

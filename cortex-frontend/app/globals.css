@@ -85,17 +85,18 @@ button { font:inherit; color:inherit; }
   box-shadow: 0 10px 25px rgba(0,0,0,0.05);
 }
 .dash-nav-item.active {
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
   border-color: var(--accent);
-  color: var(--accent-contrast);
+  color: var(--foreground);
 }
 .dash-nav-item.active:hover {
-  box-shadow: 0 10px 25px color-mix(in srgb, var(--accent) 24%, transparent);
+  box-shadow: 0 10px 25px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 .dash-sidebar-bottom {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
   padding-top: 24px;
   border-top: 1px solid var(--border);
 }
