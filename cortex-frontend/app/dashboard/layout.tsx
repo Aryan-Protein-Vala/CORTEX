@@ -3,22 +3,22 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Brain, BarChart3, Code2, Zap, Moon, Sun, ArrowLeft } from 'lucide-react'
+import { Network, Search, FileCode2, Moon, Sun, ArrowLeft, BrainCircuit } from 'lucide-react'
 
 function ThemeToggle() {
   const [dark, setDark] = useState(false)
   useEffect(() => { const saved = localStorage.getItem('cortex-theme'); const isDark = saved === 'dark'; setDark(isDark); document.documentElement.classList.toggle('dark', isDark) }, [])
   const toggle = () => { const next = !dark; setDark(next); document.documentElement.classList.toggle('dark', next); localStorage.setItem('cortex-theme', next ? 'dark' : 'light') }
-  return <button onClick={toggle} className="sidebar-btn" aria-label={`Switch to ${dark ? 'light' : 'dark'} mode`}>{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
+  return <button onClick={toggle} className="icon-button" aria-label={`Switch to ${dark ? 'light' : 'dark'} mode`}>{dark ? <Sun size={18} /> : <Moon size={18} />}</button>
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   const navItems = [
-    { href: '/dashboard', label: 'Overview', icon: BarChart3, emoji: '📊' },
-    { href: '/dashboard/brain', label: 'Neural Network', icon: Brain, emoji: '🧠' },
-    { href: '/dashboard/docs', label: '</> Dev Docs', icon: Code2, emoji: '⚡' },
+    { href: '/dashboard', label: 'Overview', icon: Network },
+    { href: '/dashboard/brain', label: '3D Hive Mind', icon: BrainCircuit },
+    { href: '/dashboard/docs', label: '</> Developer', icon: FileCode2 },
   ]
 
   return (
@@ -26,14 +26,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* Vertical Sidebar */}
       <aside className="dash-sidebar">
         <div className="dash-sidebar-top">
-          <Link href="/" className="dash-logo">
-            <Zap size={20} className="dash-logo-icon" />
-            <span>CORTEX</span>
+          <Link href="/" className="logo" style={{ fontSize: '26px' }}>
+            Cortex<span>.</span>
           </Link>
-          <p className="dash-logo-tag">your ai&apos;s external brain</p>
+          <p className="mono" style={{ margin: '8px 0 0', opacity: 0.7 }}>// external brain</p>
         </div>
 
         <nav className="dash-nav">
+          <p className="eyebrow" style={{ marginBottom: '16px', color: 'var(--accent)' }}>NAVIGATION / 01</p>
           {navItems.map(item => {
             const isActive = pathname === item.href
             return (
@@ -42,7 +42,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 href={item.href}
                 className={`dash-nav-item ${isActive ? 'active' : ''}`}
               >
-                <item.icon size={16} />
+                <item.icon size={18} />
                 <span>{item.label}</span>
               </Link>
             )
@@ -51,8 +51,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <div className="dash-sidebar-bottom">
           <ThemeToggle />
-          <Link href="/" className="sidebar-btn">
-            <ArrowLeft size={16} />
+          <Link href="/" className="icon-button" style={{ marginLeft: '12px' }}>
+            <ArrowLeft size={18} />
           </Link>
         </div>
       </aside>
@@ -70,9 +70,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           color: var(--foreground);
         }
         .dash-sidebar {
-          width: 220px;
+          width: 260px;
           min-height: 100vh;
-          padding: 24px 16px;
+          padding: 32px 24px;
           border-right: 1px solid var(--border);
           background: var(--surface);
           display: flex;
@@ -81,83 +81,58 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           top: 0;
           height: 100vh;
         }
-        .dash-sidebar-top { margin-bottom: 36px; }
-        .dash-logo {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 18px;
-          font-weight: 800;
-          letter-spacing: -.06em;
-          text-decoration: none;
-          color: var(--foreground);
-        }
-        .dash-logo-icon { color: var(--accent); }
-        .dash-logo-tag {
-          margin: 4px 0 0;
-          font: 10px monospace;
-          letter-spacing: .08em;
-          color: var(--secondary);
-        }
+        .dash-sidebar-top { margin-bottom: 50px; }
+        
         .dash-nav {
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 12px;
           flex: 1;
         }
         .dash-nav-item {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 10px 12px;
-          border-radius: 8px;
-          font-size: 13px;
-          font-weight: 500;
+          gap: 12px;
+          padding: 14px 16px;
+          border-radius: 12px;
+          font-size: 14px;
+          font-weight: 600;
           color: var(--secondary);
           text-decoration: none;
+          border: 1px solid transparent;
           transition: all .2s;
         }
         .dash-nav-item:hover {
-          background: var(--muted);
           color: var(--foreground);
+          border-color: var(--border);
+          background: var(--muted);
+          transform: translateX(4px);
         }
         .dash-nav-item.active {
-          background: var(--accent);
-          color: var(--accent-contrast);
-          font-weight: 700;
+          background: color-mix(in srgb, var(--accent) 8%, transparent);
+          border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+          color: var(--accent);
         }
         .dash-sidebar-bottom {
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding-top: 16px;
+          padding-top: 24px;
           border-top: 1px solid var(--border);
         }
-        :global(.sidebar-btn) {
-          display: grid;
-          place-items: center;
-          width: 36px;
-          height: 36px;
-          border-radius: 8px;
-          border: 1px solid var(--border);
-          background: var(--surface);
-          color: var(--secondary);
-          cursor: pointer;
-          transition: all .2s;
-        }
-        :global(.sidebar-btn:hover) {
-          color: var(--foreground);
-          border-color: var(--accent);
-        }
+        
         .dash-main {
           flex: 1;
           min-height: 100vh;
           overflow-y: auto;
+          position: relative;
         }
         @media (max-width: 768px) {
-          .dash-sidebar { width: 60px; padding: 16px 8px; }
-          .dash-logo span, .dash-logo-tag, .dash-nav-item span { display: none; }
-          .dash-nav-item { justify-content: center; padding: 10px; }
+          .dash-sidebar { width: 80px; padding: 24px 12px; }
+          .logo span:last-child { display: none; }
+          .logo { font-size: 18px !important; }
+          .dash-sidebar-top .mono, .dash-nav-item span, .dash-nav .eyebrow { display: none; }
+          .dash-nav-item { justify-content: center; padding: 14px; }
+          .dash-nav-item:hover { transform: none; }
         }
       `}</style>
     </div>

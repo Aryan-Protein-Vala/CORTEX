@@ -257,41 +257,42 @@ export default function BrainPage() {
       {/* Floating title */}
       <div style={{
         position: 'absolute', top: 24, right: 24, zIndex: 60,
-        padding: '8px 14px', borderRadius: 20,
+        padding: '12px 18px', borderRadius: 4,
         background: 'rgba(10,10,10,0.8)', backdropFilter: 'blur(12px)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        font: '11px monospace', color: '#a8a29e',
+        border: '1px solid var(--border)',
+        font: '11px monospace', color: 'var(--secondary)', letterSpacing: '.12em'
       }}>
-        🧠 CORTEX NEURAL NETWORK • DRAG TO ORBIT • SCROLL TO ZOOM
+        <span style={{ color: 'var(--accent)', marginRight: '8px' }}>●</span>
+        3D HIVE MIND • DRAG TO ORBIT
       </div>
 
       {/* Neuron Inspector (floating bottom-left) */}
       {selectedNeuron && (
         <div style={{
-          position: 'absolute', bottom: 24, left: 24, zIndex: 60,
-          width: 320, padding: 20, borderRadius: 14,
+          position: 'absolute', bottom: 32, left: 32, zIndex: 60,
+          width: 340, padding: 24, borderRadius: 0,
           background: 'rgba(10,10,10,0.9)', backdropFilter: 'blur(16px)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          color: '#fff', font: '12px monospace',
+          border: '1px solid var(--border)',
+          color: 'var(--foreground)',
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ fontSize: 10, color: '#a8a29e' }}>{selectedNeuron.isGlobal ? 'cortex://global' : 'cortex://user'}</span>
-            <span style={{ fontSize: 10, color: selectedNeuron.locked ? '#f59e0b' : '#06b6d4' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, font: '11px monospace', letterSpacing: '.1em' }}>
+            <span style={{ color: 'var(--secondary)' }}>{selectedNeuron.isGlobal ? 'cortex://global' : 'cortex://user'}</span>
+            <span style={{ color: selectedNeuron.locked ? 'var(--accent)' : '#06b6d4' }}>
               {selectedNeuron.locked ? '🔒 AMYGDALA LOCK' : '⚡ DYNAMIC'}
             </span>
           </div>
-          <h3 style={{ margin: '0 0 12px', fontSize: 20, fontWeight: 800, fontFamily: 'inherit', letterSpacing: '-.03em' }}>{selectedNeuron.label}</h3>
+          <h3 style={{ margin: '0 0 16px', fontSize: 24, fontWeight: 800, letterSpacing: '-.05em' }}>{selectedNeuron.label}</h3>
 
           {/* Retention bar */}
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 4 }}>
-              <span style={{ color: '#a8a29e' }}>Retention (R)</span>
-              <span style={{ color: selectedNeuron.retention > 0.6 ? '#22c55e' : '#f59e0b' }}>{(selectedNeuron.retention * 100).toFixed(1)}%</span>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', font: '10px monospace', marginBottom: 6 }}>
+              <span style={{ color: 'var(--secondary)' }}>RETENTION (R)</span>
+              <span style={{ color: selectedNeuron.retention > 0.6 ? '#22c55e' : 'var(--accent)' }}>{(selectedNeuron.retention * 100).toFixed(1)}%</span>
             </div>
-            <div style={{ width: '100%', height: 6, background: '#27272a', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ width: '100%', height: 4, background: 'var(--muted)', overflow: 'hidden' }}>
               <div style={{
-                width: `${selectedNeuron.retention * 100}%`, height: '100%', borderRadius: 3,
-                background: selectedNeuron.locked ? '#f59e0b' : selectedNeuron.retention > 0.6 ? '#22c55e' : '#64748b',
+                width: `${selectedNeuron.retention * 100}%`, height: '100%',
+                background: selectedNeuron.locked ? 'var(--accent)' : selectedNeuron.retention > 0.6 ? '#22c55e' : '#64748b',
                 transition: 'width .5s',
               }} />
             </div>
@@ -300,29 +301,31 @@ export default function BrainPage() {
           <button
             onClick={() => setSelectedNeuron(null)}
             style={{
-              width: '100%', marginTop: 8, padding: '8px 0', borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.1)', background: 'transparent',
-              color: '#a8a29e', cursor: 'pointer', font: '11px monospace',
+              width: '100%', marginTop: 8, padding: '12px 0',
+              border: '1px solid var(--border)', background: 'transparent',
+              color: 'var(--secondary)', cursor: 'pointer', font: '11px monospace', letterSpacing: '.1em'
             }}
+            onMouseOver={(e) => { e.currentTarget.style.color = 'var(--foreground)'; e.currentTarget.style.borderColor = 'var(--foreground)' }}
+            onMouseOut={(e) => { e.currentTarget.style.color = 'var(--secondary)'; e.currentTarget.style.borderColor = 'var(--border)' }}
           >
-            Dismiss
+            DISMISS
           </button>
         </div>
       )}
 
       {/* Legend (floating bottom-right) */}
       <div style={{
-        position: 'absolute', bottom: 24, right: 24, zIndex: 60,
-        padding: '12px 16px', borderRadius: 10,
+        position: 'absolute', bottom: 32, right: 32, zIndex: 60,
+        padding: '16px 20px', borderRadius: 0,
         background: 'rgba(10,10,10,0.8)', backdropFilter: 'blur(12px)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        font: '10px monospace', color: '#a8a29e',
-        display: 'flex', flexDirection: 'column', gap: 6,
+        border: '1px solid var(--border)',
+        font: '10px monospace', color: 'var(--secondary)', letterSpacing: '.05em',
+        display: 'flex', flexDirection: 'column', gap: 10,
       }}>
-        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', marginRight: 6 }} />Amygdala Lock (100%)</span>
-        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#06b6d4', marginRight: 6 }} />Active Synapse</span>
-        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#a855f7', marginRight: 6 }} />Global Mesh</span>
-        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#475569', marginRight: 6, opacity: 0.4 }} />Ebbinghaus Decayed</span>
+        <span style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', marginRight: 10 }} />AMYGDALA LOCK (100%)</span>
+        <span style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#06b6d4', marginRight: 10 }} />ACTIVE SYNAPSE</span>
+        <span style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#a855f7', marginRight: 10 }} />GLOBAL MESH</span>
+        <span style={{ display: 'flex', alignItems: 'center', opacity: 0.5 }}><span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#475569', marginRight: 10 }} />EBBINGHAUS DECAYED</span>
       </div>
     </div>
   )
