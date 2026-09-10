@@ -19,7 +19,7 @@ qdrant-client = "1.7"
 # HTTP API
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 axum = { version = "0.7", features = ["ws"] }
-tower-http = { version = "0.5", features = ["cors"] }
+tower-http = { version = "0.5", features = ["cors", "timeout", "limit", "trace", "catch-panic"] }
 
 # RPC
 tonic = "0.10"
@@ -34,3 +34,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.10"
 base64 = "0.21"
+
+[profile.release]
+# Small, deterministic single-binary builds for the installer path. A panic in a
+# handler is still caught (CatchPanicLayer) because unwinding is left enabled.
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[dev-dependencies]
+# Drives the router in-process (no socket) for the API contract tests.
+tower = { version = "0.7", features = ["util"] }
+http-body-util = "0.1"

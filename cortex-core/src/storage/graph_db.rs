@@ -1,205 +1,259 @@
-use anyhow::{Result, Context};
+//! Optional SurrealDB backend. Enabled with `CORTEX_SURREAL_URL`; the default
+//! backend is the zero-infrastructure [`crate::storage::store::FileGraphStore`].
+//!
+//! Ids follow the single contract in [`crate::types`]: record keys are **bare**
+//! (`("node", "9f3c…")`), and the field is persisted as `key`, so nothing ever
+//! becomes `node:node:…` and every read matches the write.
+
+use crate::types::{canonical_node_id, normalize_owner, strip_id_prefix, MemoryNode, RelationalEdge};
+use anyhow::{Context, Result};
 use surrealdb::engine::any::connect;
 use surrealdb::engine::any::Any;
+use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
-use crate::types::{MemoryNode, RelationalEdge};
+
+/// Explicit field list keeps deserialization independent of how the record's own
+/// `id` (a record id, not a string) happens to serialize.
+const NODE_FIELDS: &str = "key, label, label_key, aliases, stability, impact, locked, fading, category, owner_uri, provenance, created_at, updated_at, last_accessed, access_count, metadata, embedding, embedding_model";
+const EDGE_FIELDS: &str = "key, source, target, predicate, weight, is_historical, confidence, impact, locked, owner_uri, provenance, created_at, last_reinforced, reinforcement_count";
 
 pub struct GraphMemory {
     db: Surreal<Any>,
 }
 
 impl GraphMemory {
-    pub async fn new(url: &str, user: &str, pass: &str, namespace: &str, database: &str) -> Result<Self> {
+    pub async fn new(
+        url: &str,
+        user: &str,
+        pass: &str,
+        namespace: &str,
+        database: &str,
+    ) -> Result<Self> {
         let db = connect(url).await.context("Failed to connect to SurrealDB")?;
-        
-        db.signin(surrealdb::opt::auth::Root {
+
+        db.signin(Root {
             username: user,
             password: pass,
-        }).await.context("Failed to sign in to SurrealDB")?;
-        
-        db.use_ns(namespace).use_db(database).await.context("Failed to select namespace/database")?;
-        
+        })
+        .await
+        .context("Failed to sign in to SurrealDB")?;
+
+        db.use_ns(namespace)
+            .use_db(database)
+            .await
+            .context("Failed to select namespace/database")?;
+
         Ok(Self { db })
     }
-    
-    /// Upsert a node into the graph
-    pub async fn upsert_node(&self, node: &MemoryNode) -> Result<Option<MemoryNode>> {
-        let created: Option<MemoryNode> = self.db
-            .update(("node", &node.id))
-            .content(node)
-            .await?;
-        Ok(created)
+
+    /// Liveness probe used by `/health` (a constructed client is not proof).
+    pub async fn ping(&self) -> Result<()> {
+        let mut resp = self
+            .db
+            .query("SELECT 1 AS ok FROM true LIMIT 1;")
+            .await
+            .context("SurrealDB ping failed")?;
+        let check: Vec<serde_json::Value> = resp.take(0)?;
+        if check.is_empty() {
+            anyhow::bail!("SurrealDB ping returned no rows");
+        }
+        Ok(())
     }
-    
-    /// Get a node by ID
+
+    /// Serializes the node without its `key` and writes it under the bare id.
+    fn to_doc<T: serde::Serialize>(value: &T) -> Result<serde_json::Value> {
+        let mut doc = serde_json::to_value(value).context("serializing record")?;
+        if let Some(map) = doc.as_object_mut() {
+            // `key` is the record id; keeping it in CONTENT is redundant but
+            // harmless. `id` must never be present — that is what previously
+            // collided with the record identifier.
+            map.remove("id");
+        }
+        Ok(doc)
+    }
+
+    pub async fn upsert_node(&self, node: &MemoryNode) -> Result<bool> {
+        let existed = self.get_node(&node.id).await?.is_some();
+        let doc = Self::to_doc(node)?;
+        let _: Option<MemoryNode> = self
+            .db
+            .update(("node", strip_id_prefix(&node.id).as_str()))
+            .content(doc)
+            .await
+            .context("upsert_node")?;
+        Ok(!existed)
+    }
+
+    pub async fn upsert_edge(&self, edge: &RelationalEdge) -> Result<bool> {
+        let existed = self.get_edge(&edge.id).await?.is_some();
+        let doc = Self::to_doc(edge)?;
+        let _: Option<RelationalEdge> = self
+            .db
+            .update(("edge", strip_id_prefix(&edge.id).as_str()))
+            .content(doc)
+            .await
+            .context("upsert_edge")?;
+        Ok(!existed)
+    }
+
     pub async fn get_node(&self, id: &str) -> Result<Option<MemoryNode>> {
-        let node: Option<MemoryNode> = self.db.select(("node", id)).await?;
-        Ok(node)
+        let bare = canonical_node_id(id);
+        let mut resp = self
+            .db
+            .query(format!("SELECT {} FROM node WHERE key = $key LIMIT 1;", NODE_FIELDS))
+            .bind(("key", bare))
+            .await
+            .context("get_node")?;
+        let rows: Vec<MemoryNode> = resp.take(0)?;
+        Ok(rows.into_iter().next())
     }
-    
-    /// Upsert an edge between two nodes
-    pub async fn upsert_edge(&self, edge: &RelationalEdge) -> Result<Option<RelationalEdge>> {
-        let created: Option<RelationalEdge> = self.db
-            .update(("edge", &edge.id))
-            .content(edge)
-            .await?;
-        Ok(created)
+
+    pub async fn get_edge(&self, id: &str) -> Result<Option<RelationalEdge>> {
+        let bare = strip_id_prefix(id);
+        let mut resp = self
+            .db
+            .query(format!("SELECT {} FROM edge WHERE key = $key LIMIT 1;", EDGE_FIELDS))
+            .bind(("key", bare))
+            .await
+            .context("get_edge")?;
+        let rows: Vec<RelationalEdge> = resp.take(0)?;
+        Ok(rows.into_iter().next())
     }
-    
-    /// Find a node by exact or canonical label
+
+    /// Exact label lookup via the deterministic id — no unique index required.
     pub async fn find_node_by_label(&self, label: &str) -> Result<Option<MemoryNode>> {
-        let mut response = self.db
-            .query("SELECT * FROM node WHERE label = $label LIMIT 1")
-            .bind(("label", label.to_string()))
-            .await?;
-        let node: Option<MemoryNode> = response.take(0)?;
-        Ok(node)
+        let id = crate::types::node_id_for_label(label);
+        self.get_node(&id).await
     }
 
-    /// Retrieve all nodes in the knowledge graph
+    pub async fn list_nodes_for_owner(&self, owner: &str, limit: usize) -> Result<Vec<MemoryNode>> {
+        let owner = normalize_owner(owner);
+        let mut resp = self
+            .db
+            .query(format!(
+                "SELECT {} FROM node WHERE owner_uri = $owner ORDER BY updated_at DESC LIMIT {};",
+                NODE_FIELDS, limit
+            ))
+            .bind(("owner", owner))
+            .await
+            .context("list_nodes_for_owner")?;
+        let rows: Vec<MemoryNode> = resp.take(0)?;
+        Ok(rows)
+    }
+
     pub async fn get_all_nodes(&self) -> Result<Vec<MemoryNode>> {
-        let nodes: Vec<MemoryNode> = self.db.select("node").await?;
-        Ok(nodes)
+        let mut resp = self
+            .db
+            .query(format!("SELECT {} FROM node;", NODE_FIELDS))
+            .await
+            .context("get_all_nodes")?;
+        let rows: Vec<MemoryNode> = resp.take(0)?;
+        Ok(rows)
     }
 
-    /// Retrieve all edges in the knowledge graph
     pub async fn get_all_edges(&self) -> Result<Vec<RelationalEdge>> {
-        let edges: Vec<RelationalEdge> = self.db.select("edge").await?;
-        Ok(edges)
+        let mut resp = self
+            .db
+            .query(format!("SELECT {} FROM edge;", EDGE_FIELDS))
+            .await
+            .context("get_all_edges")?;
+        let rows: Vec<RelationalEdge> = resp.take(0)?;
+        Ok(rows)
     }
 
-    /// Retrieve all nodes for a specific owner URI (cortex:// protocol)
-    pub async fn get_nodes_by_owner(&self, owner_uri: &str) -> Result<Vec<MemoryNode>> {
-        let mut response = self.db.query("SELECT * FROM node WHERE owner_uri = $owner").bind(("owner", owner_uri)).await?;
-        let nodes: Vec<MemoryNode> = response.take(0)?;
-        Ok(nodes)
-    }
-
-    /// Retrieve all edges for a specific owner URI (cortex:// protocol)
-    pub async fn get_edges_by_owner(&self, owner_uri: &str) -> Result<Vec<RelationalEdge>> {
-        let mut response = self.db.query("SELECT * FROM edge WHERE owner_uri = $owner").bind(("owner", owner_uri)).await?;
-        let edges: Vec<RelationalEdge> = response.take(0)?;
-        Ok(edges)
-    }
-
-    /// Publish nodes and edges to the Global Mesh (cortex://global)
-    pub async fn publish_to_mesh(&self, nodes: Vec<MemoryNode>, edges: Vec<RelationalEdge>) -> Result<()> {
-        for mut node in nodes {
-            node.owner_uri = "cortex://global".to_string();
-            // Optional: anonymize or strip PII from node.label or metadata here
-            let _ = self.upsert_node(&node).await;
+    pub async fn edges_for_nodes(
+        &self,
+        node_ids: &std::collections::HashSet<String>,
+        owner: Option<&str>,
+    ) -> Result<Vec<RelationalEdge>> {
+        if node_ids.is_empty() {
+            return Ok(vec![]);
         }
-        for mut edge in edges {
-            edge.owner_uri = "cortex://global".to_string();
-            let _ = self.upsert_edge(&edge).await;
-        }
-        Ok(())
-    }
-
-    /// Delete a node by ID
-    pub async fn delete_node(&self, id: &str) -> Result<()> {
-        let clean_id = id.trim_start_matches("node:");
-        let _: Option<MemoryNode> = self.db.delete(("node", clean_id)).await?;
-        Ok(())
-    }
-
-    /// Delete an edge by ID
-    pub async fn delete_edge(&self, id: &str) -> Result<()> {
-        let clean_id = id.trim_start_matches("edge:");
-        let _: Option<RelationalEdge> = self.db.delete(("edge", clean_id)).await?;
-        Ok(())
-    }
-    
-    /// Perform a parameterized multi-hop traversal to retrieve context safely
-    pub async fn traverse(&self, start_node_id: &str, max_hops: u8) -> Result<(Vec<MemoryNode>, Vec<RelationalEdge>)> {
-        use std::collections::{HashSet, VecDeque};
-
-        let mut nodes: Vec<MemoryNode> = Vec::new();
-        let mut edges: Vec<RelationalEdge> = Vec::new();
-        let mut visited_nodes: HashSet<String> = HashSet::new();
-        let mut visited_edges: HashSet<String> = HashSet::new();
-
-        let initial_clean_id = start_node_id.trim_start_matches("node:").to_string();
-        
-        let start_node = match self.get_node(&initial_clean_id).await? {
-            Some(n) => n,
-            None => return Ok((nodes, edges)),
+        let ids: Vec<String> = node_ids.iter().map(|i| strip_id_prefix(i)).collect();
+        let owner = owner.map(normalize_owner);
+        let sql = match owner {
+            Some(_) => format!(
+                "SELECT {} FROM edge WHERE (source IN $ids OR target IN $ids) AND owner_uri = $owner;",
+                EDGE_FIELDS
+            ),
+            None => format!(
+                "SELECT {} FROM edge WHERE source IN $ids OR target IN $ids;",
+                EDGE_FIELDS
+            ),
         };
-
-        visited_nodes.insert(initial_clean_id.clone());
-        nodes.push(start_node);
-
-        let mut queue: VecDeque<(String, u8)> = VecDeque::new();
-        queue.push_back((initial_clean_id, 0));
-
-        let hop_limit = max_hops.clamp(1, 6);
-
-        while let Some((curr_id, current_hop)) = queue.pop_front() {
-            if current_hop >= hop_limit {
-                continue;
-            }
-
-            let curr_id_full = format!("node:{}", curr_id);
-
-            // Fetch outgoing and incoming edges safely with parameter binding
-            let mut response = self.db
-                .query("SELECT * FROM edge WHERE source = $nid OR target = $nid")
-                .bind(("nid", curr_id_full))
-                .await?;
-
-            let found_edges: Vec<RelationalEdge> = response.take(0)?;
-            for edge in found_edges {
-                if !visited_edges.contains(&edge.id) {
-                    visited_edges.insert(edge.id.clone());
-                    edges.push(edge.clone());
-                }
-
-                let neighbor_clean = if edge.source.contains(&curr_id) {
-                    edge.target.trim_start_matches("node:").to_string()
-                } else {
-                    edge.source.trim_start_matches("node:").to_string()
-                };
-
-                if !visited_nodes.contains(&neighbor_clean) {
-                    visited_nodes.insert(neighbor_clean.clone());
-                    if let Ok(Some(neighbor)) = self.get_node(&neighbor_clean).await {
-                        nodes.push(neighbor);
-                        if current_hop + 1 < hop_limit {
-                            queue.push_back((neighbor_clean, current_hop + 1));
-                        }
-                    }
-                }
-            }
+        let mut query = self.db.query(&sql).bind(("ids", ids));
+        if let Some(o) = owner {
+            query = query.bind(("owner", o));
         }
-        
-        Ok((nodes, edges))
+        let mut resp = query.await.context("edges_for_nodes")?;
+        let rows: Vec<RelationalEdge> = resp.take(0)?;
+        Ok(rows)
     }
-    
-    /// Execute the sweep (decay pruning) against live graph database
-    pub async fn sweep_decay(&self, decay_engine: &crate::engine::decay::DecayEngine) -> Result<usize> {
-        let mut nodes = self.get_all_nodes().await?;
-        let node_ids_to_prune = decay_engine.process_nodes_sweep(&mut nodes);
-        
-        let mut node_retentions = std::collections::HashMap::new();
-        for node in &nodes {
-            node_retentions.insert(node.id.clone(), node.retention_probability());
+
+    pub async fn delete_node(&self, id: &str) -> Result<bool> {
+        let key = canonical_node_id(id);
+        let bare = strip_id_prefix(id);
+        // Cascade first: an edge whose endpoint is gone is unreadable noise.
+        let mut dangling = self
+            .db
+            .query(format!(
+                "SELECT {} FROM edge WHERE source = $id OR target = $id;",
+                EDGE_FIELDS
+            ))
+            .bind(("id", key.clone()))
+            .await
+            .context("find dangling edges")?;
+        let edges: Vec<RelationalEdge> = dangling.take(0)?;
+        for edge in edges {
+            let _ = self.delete_edge(&edge.id).await;
         }
-        
-        let mut edges = self.get_all_edges().await?;
-        let edge_ids_to_prune = decay_engine.process_edges_sweep(&mut edges, &node_retentions);
-        
-        let mut pruned_count = 0;
-        for nid in &node_ids_to_prune {
-            if self.delete_node(nid).await.is_ok() {
-                pruned_count += 1;
+
+        let deleted: Option<MemoryNode> = self
+            .db
+            .delete(("node", bare.as_str()))
+            .await
+            .context("delete_node")?;
+        Ok(deleted.is_some())
+    }
+
+    pub async fn delete_edge(&self, id: &str) -> Result<bool> {
+        let bare = strip_id_prefix(id);
+        let deleted: Option<RelationalEdge> = self
+            .db
+            .delete(("edge", bare.as_str()))
+            .await
+            .context("delete_edge")?;
+        Ok(deleted.is_some())
+    }
+
+    /// Read-modify-write: `update(...).content(partial)` would replace the whole
+    /// record and silently null out stability/impact.
+    pub async fn set_node_locked(&self, id: &str, locked: bool) -> Result<Option<MemoryNode>> {
+        match self.get_node(id).await? {
+            Some(mut node) => {
+                node.locked = locked;
+                node.updated_at = chrono::Utc::now();
+                self.upsert_node(&node).await?;
+                Ok(Some(node))
             }
+            None => Ok(None),
         }
-        for eid in &edge_ids_to_prune {
-            if self.delete_edge(eid).await.is_ok() {
-                pruned_count += 1;
+    }
+
+    pub async fn set_edge_locked(&self, id: &str, locked: bool) -> Result<Option<RelationalEdge>> {
+        match self.get_edge(id).await? {
+            Some(mut edge) => {
+                edge.locked = locked;
+                self.upsert_edge(&edge).await?;
+                Ok(Some(edge))
             }
+            None => Ok(None),
         }
-        
-        Ok(pruned_count)
+    }
+
+    pub async fn counts(&self) -> Result<(usize, usize)> {
+        let nodes = self.get_all_nodes().await?.len();
+        let edges = self.get_all_edges().await?.len();
+        Ok((nodes, edges))
     }
 }

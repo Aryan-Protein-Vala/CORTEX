@@ -1,6 +1,7 @@
 use anyhow::{Result, Context};
 use qdrant_client::qdrant::{
-    PointStruct, SearchPointsBuilder, Value as QdrantValue, Vector, UpsertPointsBuilder
+    DeletePointsBuilder, PointId, PointStruct, SearchPointsBuilder, Value as QdrantValue, Vector,
+    UpsertPointsBuilder,
 };
 use qdrant_client::Qdrant;
 use uuid::Uuid;
@@ -219,26 +220,104 @@ impl VectorIndex {
         Ok(node_ids)
     }
     
-    /// Insert a new embedding pointing to a Node ID
+    /// Which provider actually produced the vectors — recorded on every point so
+    /// a later switch of embedding model cannot silently mix incompatible spaces.
+    pub fn embedding_model_tag(&self) -> &'static str {
+        if self.openai_api_key.is_some() {
+            "openai:text-embedding-3-small"
+        } else if self.openrouter_api_key.is_some() {
+            "openrouter:text-embedding-3-small"
+        } else {
+            "cortex-local-128"
+        }
+    }
+
+    /// Insert (or replace) the embedding for a node.
+    ///
+    /// The point id is derived from the node id, so re-embedding a node updates
+    /// one point instead of appending an orphan that nothing can ever delete.
     pub async fn upsert_mapping(&self, node_id: &str, vector: Vec<f32>) -> Result<()> {
         let mut payload = std::collections::HashMap::new();
-        payload.insert(
-            "node_id".to_string(),
-            QdrantValue {
-                kind: Some(qdrant_client::qdrant::value::Kind::StringValue(node_id.to_string())),
-            },
-        );
-        
+        for (key, value) in [
+            ("node_id".to_string(), node_id.to_string()),
+            ("model".to_string(), self.embedding_model_tag().to_string()),
+        ] {
+            payload.insert(
+                key,
+                QdrantValue {
+                    kind: Some(qdrant_client::qdrant::value::Kind::StringValue(value)),
+                },
+            );
+        }
+
         let point = PointStruct {
-            id: Some(Uuid::new_v4().to_string().into()),
+            id: Some(PointId::from(point_id_for(node_id))),
             vectors: Some(Vector::from(vector).into()),
             payload,
         };
-        
+
         let upsert_request = UpsertPointsBuilder::new(&self.collection_name, vec![point]);
         self.client.upsert_points(upsert_request).await?;
-        
+
         Ok(())
+    }
+
+    /// Drop the vectors for deleted nodes, so recall can never surface a
+    /// dangling id whose node is gone.
+    pub async fn delete_for_nodes(&self, node_ids: &[String]) -> Result<usize> {
+        if node_ids.is_empty() {
+            return Ok(0);
+        }
+        let ids: Vec<PointId> = node_ids
+            .iter()
+            .map(|id| PointId::from(point_id_for(id)))
+            .collect();
+        let request = DeletePointsBuilder::new(&self.collection_name).points(ids).build();
+        let response = self.client.delete_points(request).await?;
+        Ok(response
+            .result
+            .map(|r| r.deleted as usize)
+            .unwrap_or(0))
+    }
+}
+
+/// Deterministic UUID-shaped Qdrant point id for a node id.
+pub fn point_id_for(node_id: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"cortex-vector-point:");
+    hasher.update(node_id.as_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    // Set the version (5) and variant bits so the value parses as a UUID.
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn point_ids_are_stable_and_uuid_shaped() {
+        let a = point_id_for("node:9f3c");
+        assert_eq!(a, point_id_for("node:9f3c"));
+        assert_ne!(a, point_id_for("node:9f3d"));
+        assert_eq!(a.len(), 36, "must be a UUID string: {a}");
+        assert!(Uuid::parse_str(&a).is_ok(), "not a valid UUID: {a}");
+    }
+
+    #[test]
+    fn local_embedding_is_deterministic_and_normalized() {
+        let a = compute_local_embedding("I prefer postgres for the graph store");
+        let b = compute_local_embedding("I prefer postgres for the graph store");
+        assert_eq!(a.len(), VECTOR_DIM);
+        assert_eq!(a, b);
+        let norm = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 0.05, "not unit length: {norm}");
+        assert!(cosine_similarity(&a, &b) > 0.999);
+        assert!(cosine_similarity(&a, &compute_local_embedding("totally unrelated: kubernetes helm chart")) < 0.9);
     }
 }
 
