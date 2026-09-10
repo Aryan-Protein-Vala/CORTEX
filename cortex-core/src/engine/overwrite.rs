@@ -17,6 +17,8 @@ impl StateOverwriteEngine {
     pub fn apply_overwrite(
         &self,
         new_triplet: &SemanticTriplet,
+        source_id: &str,
+        target_id: &str,
         existing_edges: &mut [RelationalEdge]
     ) -> Result<Option<RelationalEdge>> {
         
@@ -24,10 +26,13 @@ impl StateOverwriteEngine {
             return Ok(None);
         }
         
-        // Find existing edge with same source and object, but different predicate
+        // Find existing edge with matching endpoints, but different predicate
         for edge in existing_edges.iter_mut() {
-            if edge.source == new_triplet.subject && edge.target == new_triplet.object {
-                if edge.predicate != new_triplet.predicate {
+            let matches_source = edge.source == source_id || edge.source.eq_ignore_ascii_case(&new_triplet.subject);
+            let matches_target = edge.target == target_id || edge.target.eq_ignore_ascii_case(&new_triplet.object);
+            
+            if matches_source && matches_target {
+                if !edge.predicate.eq_ignore_ascii_case(&new_triplet.predicate) {
                     // Contradiction found. Obsolete the old edge.
                     edge.is_historical = true;
                     edge.weight = 0.0;

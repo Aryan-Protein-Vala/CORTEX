@@ -19,6 +19,54 @@ impl VectorIndex {
             collection_name: collection_name.to_string(),
         })
     }
+
+    /// Ensure that the Qdrant collection exists with appropriate vector dimensions
+    pub async fn ensure_collection(&self) -> Result<()> {
+        use qdrant_client::qdrant::{CreateCollectionBuilder, Distance, VectorParamsBuilder};
+        
+        if let Ok(exists) = self.client.collection_exists(&self.collection_name).await {
+            if !exists {
+                let params = VectorParamsBuilder::new(128, Distance::Cosine).build();
+                let request = CreateCollectionBuilder::new(&self.collection_name)
+                    .vectors_config(params)
+                    .build();
+                let _ = self.client.create_collection(request).await;
+            }
+        }
+        Ok(())
+    }
+
+    /// Generate a normalized deterministic semantic vector from raw text
+    pub fn embed_text(&self, text: &str) -> Vec<f32> {
+        use sha2::{Sha256, Digest};
+        let dim = 128;
+        let mut vec = vec![0.0f32; dim];
+        let lower = text.to_lowercase();
+        let words: Vec<&str> = lower.split_whitespace().collect();
+        
+        if words.is_empty() {
+            return vec;
+        }
+        
+        for word in words {
+            let mut hasher = Sha256::new();
+            hasher.update(word.as_bytes());
+            let hash = hasher.finalize();
+            for i in 0..dim {
+                let byte_idx = i % hash.len();
+                let val = (hash[byte_idx] as f32 / 255.0) - 0.5;
+                vec[i] += val;
+            }
+        }
+        
+        let norm = (vec.iter().map(|v| v * v).sum::<f32>()).sqrt();
+        if norm > 0.0 {
+            for v in vec.iter_mut() {
+                *v /= norm;
+            }
+        }
+        vec
+    }
     
     /// Map text to an existing node ID via semantic search
     pub async fn map_to_node(&self, query_vector: Vec<f32>, top_k: u64) -> Result<Vec<String>> {

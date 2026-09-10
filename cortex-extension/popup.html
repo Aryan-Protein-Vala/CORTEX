@@ -9,25 +9,26 @@
   <div class="container">
     <div class="header">
       <span class="logo">Cortex<span>.</span></span>
-      <span class="status pulse">● GIGABRAIN ACTIVE</span>
+      <span id="status-indicator" class="status pulse">● CHECKING CORE...</span>
     </div>
     
     <div class="content">
       <p class="eyebrow">HIVE MIND CONNECTION</p>
       <div class="stat-box">
-        <span class="label">Latency</span>
-        <span class="value mono">0ms</span>
+        <span class="label">Core Latency</span>
+        <span id="latency-val" class="value mono">...</span>
       </div>
       <div class="stat-box">
-        <span class="label">Context Injected</span>
+        <span class="label">Context Budget</span>
         <span class="value mono">500 tk</span>
       </div>
     </div>
     
     <div class="footer">
       <button id="sync-btn" class="button">Force Sync Memory</button>
-      <p class="micro">Stop burning tokens. Big Tech is cooked.</p>
+      <p class="micro">Permanent memory. Universal AI protocol.</p>
     </div>
   </div>
+  <script src="popup.js"></script>
 </body>
 </html>

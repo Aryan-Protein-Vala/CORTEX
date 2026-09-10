@@ -18,7 +18,8 @@ qdrant-client = "1.7"
 
 # HTTP API
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.5", features = ["cors"] }
 
 # RPC
 tonic = "0.10"

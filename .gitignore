@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Rust build artifacts
+target/
+
+# Next.js build output
+.next/
+out/
+.vercel/
+
+# Environment files and credentials
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# IDE and Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*.tsbuildinfo
+
+# Python & JS build artifacts
+__pycache__/
+*.pyc
+*.egg-info/
+dist/

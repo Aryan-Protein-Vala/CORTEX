@@ -11,6 +11,10 @@ pub struct MemoryNode {
     /// Human-readable canonical label (e.g., "Python", "Startup Idea")
     pub label: String,
     
+    /// Owner URI for P2P Graph Sync / Scoping (e.g., cortex://user_123 or cortex://team_xyz)
+    #[serde(default = "default_owner")]
+    pub owner_uri: String,
+    
     /// Language-agnostic aliases for multilingual support
     #[serde(default)]
     pub aliases: Vec<String>,
@@ -50,6 +54,7 @@ impl MemoryNode {
         Self {
             id: format!("node:{}", Uuid::new_v4()), // We can change this to sha256 hash later based on label
             label: label.into(),
+            owner_uri: default_owner(),
             aliases: vec![],
             stability: 1.0,
             impact: 5,
@@ -67,21 +72,22 @@ impl MemoryNode {
         self.last_accessed = Utc::now();
         self.access_count += 1;
         
-        // Logarithmic stability growth: S_new = S_old + ln(1 + hits)
-        let growth = (1.0 + self.access_count as f32).ln();
-        self.stability = (self.stability + growth).min(100.0);
+        // Incremental logarithmic stability reinforcement:
+        let growth = (1.0 + (1.0 / self.access_count as f32)).ln();
+        self.stability = (self.stability + growth).clamp(1.0, 100.0);
     }
     
-    /// Calculate current retention probability using Ebbinghaus
+    /// Calculate current retention probability using Ebbinghaus forgetting math
     pub fn retention_probability(&self) -> f32 {
         if self.locked { return 1.0; }
         
-        let days_since_access = 
-            (Utc::now() - self.last_accessed).num_seconds() as f32 / 86400.0;
+        let seconds_elapsed = (Utc::now() - self.last_accessed).num_seconds().max(0);
+        let days_since_access = seconds_elapsed as f32 / 86400.0;
         
-        let decay_rate = days_since_access / (self.stability * self.impact as f32);
+        let denominator = (self.stability.max(0.1) * (self.impact.max(1) as f32)).max(0.1);
+        let decay_rate = days_since_access / denominator;
         
-        (-decay_rate).exp()
+        (-decay_rate).exp().clamp(0.0, 1.0)
     }
 }
 
@@ -117,6 +123,10 @@ pub struct RelationalEdge {
     /// Target node ID (object)
     pub target: String,
     
+    /// Owner URI for P2P Graph Sync / Scoping (e.g., cortex://user_123 or cortex://team_xyz)
+    #[serde(default = "default_owner")]
+    pub owner_uri: String,
+    
     /// Relationship type (predicate)
     /// Examples: "proficient_in", "created", "prefers", "knows"
     pub predicate: String,
@@ -151,6 +161,7 @@ impl RelationalEdge {
             id: format!("edge:{}", Uuid::new_v4()),
             source: source.into(),
             target: target.into(),
+            owner_uri: default_owner(),
             predicate: predicate.into(),
             weight: initial_weight.clamp(0.0, 1.0),
             is_historical: false,
@@ -202,6 +213,7 @@ pub struct SemanticTriplet {
 
 fn default_confidence() -> f32 { 0.7 }
 fn default_impact() -> u8 { 5 }
+fn default_owner() -> String { "cortex://default".to_string() }
 
 /// Compressed context packet for injection
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -211,6 +223,8 @@ pub struct CortexContextPacket {
     pub edges: Vec<RelationalEdge>,
     pub rules: Vec<ProceduralRule>,
     pub token_estimate: u32,
+    #[serde(default)]
+    pub context: String,
 }
 
 /// Working Memory Session State

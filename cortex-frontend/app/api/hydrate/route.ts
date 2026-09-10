@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+const CORTEX_API_URL = process.env.NEXT_PUBLIC_CORTEX_API_URL || "http://localhost:3030";
+
 export async function POST(req: Request) {
   try {
     const data = await req.json();
@@ -11,37 +13,52 @@ export async function POST(req: Request) {
 
     console.log(`🧠 [HYDRATOR] Received ${data.length} historical conversations.`);
     
-    // In production, we push this to a Redis queue and let background workers process it
-    // against OpenRouter. For now, we simulate the batch ingestion to the local Rust core.
-    
     let processed = 0;
-    for (const conversation of data.slice(0, 5)) { // Limit to 5 for safety during testing
-      // Map OpenAI messages to our memory extraction payload
+    // Process top conversations
+    for (const conversation of data.slice(0, 10)) {
+      let conversationTranscript = `Conversation: ${conversation.title || 'Untitled'}\n`;
+
+      // Extract message texts from OpenAI mapping tree if present
+      if (conversation.mapping && typeof conversation.mapping === 'object') {
+        for (const nodeId of Object.keys(conversation.mapping)) {
+          const node = conversation.mapping[nodeId];
+          if (node && node.message && node.message.content && Array.isArray(node.message.content.parts)) {
+            const role = node.message.author?.role || 'user';
+            const text = node.message.content.parts.filter((p: unknown) => typeof p === 'string').join(' ');
+            if (text.trim()) {
+              conversationTranscript += `${role.toUpperCase()}: ${text.slice(0, 500)}\n`;
+            }
+          }
+        }
+      }
+
       const payload = {
         user_id: "default_user",
-        prompt: `Historical context from: ${conversation.title}`,
+        prompt: conversationTranscript.slice(0, 4000), // bounded slice
         token_budget: 1000
       };
 
-      // Ping our local Rust Core
       try {
-        await fetch("http://localhost:3030/v1/ingest", {
+        const res = await fetch(`${CORTEX_API_URL}/v1/ingest`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        processed++;
+        if (res.ok) {
+          processed++;
+        }
       } catch (e) {
-        console.error("Rust core unreachable during hydration.", e);
+        console.warn("Rust core unreachable during hydration turn.", e);
       }
     }
 
     return NextResponse.json({ 
       success: true, 
-      message: `Retroactive Hydration started. Processed ${processed} conversations into the Hive Mind. Big Tech is cooked.`
+      processed,
+      message: `Retroactive Hydration processed ${processed} conversations into the Hive Mind.`
     });
 
   } catch (error) {
-    return NextResponse.json({ error: "Failed to parse JSON upload." }, { status: 500 });
+    return NextResponse.json({ error: "Failed to parse or process JSON upload." }, { status: 500 });
   }
 }

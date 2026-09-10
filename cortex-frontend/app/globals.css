@@ -34,3 +34,5 @@ button { font:inherit; color:inherit; }
 @media (max-width:900px) { .footer-watermark { inset:70px -10vw 38px; font-size:clamp(92px,24vw,180px); } }
 @media print { .footer-watermark { display:none; } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition-duration:.01ms!important; animation-duration:.01ms!important; }.graph-path { stroke-dashoffset:0; }.footer-watermark { animation:none; opacity:.06; transform:none; } }
+.global-mesh { stroke: #3b82f6 !important; fill: #3b82f6 !important; }
+.dark .global-mesh { stroke: #60a5fa !important; fill: #60a5fa !important; }

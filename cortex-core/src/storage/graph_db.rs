@@ -46,34 +46,160 @@ impl GraphMemory {
         Ok(created)
     }
     
-    /// Perform a multi-hop traversal to retrieve context
+    /// Find a node by exact or canonical label
+    pub async fn find_node_by_label(&self, label: &str) -> Result<Option<MemoryNode>> {
+        let mut response = self.db
+            .query("SELECT * FROM node WHERE label = $label LIMIT 1")
+            .bind(("label", label.to_string()))
+            .await?;
+        let node: Option<MemoryNode> = response.take(0)?;
+        Ok(node)
+    }
+
+    /// Retrieve all nodes in the knowledge graph
+    pub async fn get_all_nodes(&self) -> Result<Vec<MemoryNode>> {
+        let nodes: Vec<MemoryNode> = self.db.select("node").await?;
+        Ok(nodes)
+    }
+
+    /// Retrieve all edges in the knowledge graph
+    pub async fn get_all_edges(&self) -> Result<Vec<RelationalEdge>> {
+        let edges: Vec<RelationalEdge> = self.db.select("edge").await?;
+        Ok(edges)
+    }
+
+    /// Retrieve all nodes for a specific owner URI (cortex:// protocol)
+    pub async fn get_nodes_by_owner(&self, owner_uri: &str) -> Result<Vec<MemoryNode>> {
+        let mut response = self.db.query("SELECT * FROM node WHERE owner_uri = $owner").bind(("owner", owner_uri)).await?;
+        let nodes: Vec<MemoryNode> = response.take(0)?;
+        Ok(nodes)
+    }
+
+    /// Retrieve all edges for a specific owner URI (cortex:// protocol)
+    pub async fn get_edges_by_owner(&self, owner_uri: &str) -> Result<Vec<RelationalEdge>> {
+        let mut response = self.db.query("SELECT * FROM edge WHERE owner_uri = $owner").bind(("owner", owner_uri)).await?;
+        let edges: Vec<RelationalEdge> = response.take(0)?;
+        Ok(edges)
+    }
+
+    /// Publish nodes and edges to the Global Mesh (cortex://global)
+    pub async fn publish_to_mesh(&self, nodes: Vec<MemoryNode>, edges: Vec<RelationalEdge>) -> Result<()> {
+        for mut node in nodes {
+            node.owner_uri = "cortex://global".to_string();
+            // Optional: anonymize or strip PII from node.label or metadata here
+            let _ = self.upsert_node(&node).await;
+        }
+        for mut edge in edges {
+            edge.owner_uri = "cortex://global".to_string();
+            let _ = self.upsert_edge(&edge).await;
+        }
+        Ok(())
+    }
+
+    /// Delete a node by ID
+    pub async fn delete_node(&self, id: &str) -> Result<()> {
+        let clean_id = id.trim_start_matches("node:");
+        let _: Option<MemoryNode> = self.db.delete(("node", clean_id)).await?;
+        Ok(())
+    }
+
+    /// Delete an edge by ID
+    pub async fn delete_edge(&self, id: &str) -> Result<()> {
+        let clean_id = id.trim_start_matches("edge:");
+        let _: Option<RelationalEdge> = self.db.delete(("edge", clean_id)).await?;
+        Ok(())
+    }
+    
+    /// Perform a parameterized multi-hop traversal to retrieve context safely
     pub async fn traverse(&self, start_node_id: &str, max_hops: u8) -> Result<(Vec<MemoryNode>, Vec<RelationalEdge>)> {
-        // A real graph traversal query would go here.
-        // For example: SELECT * FROM node WHERE id = $id OR <-edge<-node
-        let query = format!(
-            "SELECT * FROM (SELECT ->edge->node FROM node:{} MAXDEPTH {})",
-            start_node_id, max_hops
-        );
+        use std::collections::{HashSet, VecDeque};
+
+        let mut nodes: Vec<MemoryNode> = Vec::new();
+        let mut edges: Vec<RelationalEdge> = Vec::new();
+        let mut visited_nodes: HashSet<String> = HashSet::new();
+        let mut visited_edges: HashSet<String> = HashSet::new();
+
+        let initial_clean_id = start_node_id.trim_start_matches("node:").to_string();
         
-        let _response = self.db.query(&query).await?;
-        
-        // This is a simplified extraction; in production, you'd parse the full graph structure
-        let nodes: Vec<MemoryNode> = Vec::new();
-        let edges: Vec<RelationalEdge> = Vec::new();
+        let start_node = match self.get_node(&initial_clean_id).await? {
+            Some(n) => n,
+            None => return Ok((nodes, edges)),
+        };
+
+        visited_nodes.insert(initial_clean_id.clone());
+        nodes.push(start_node);
+
+        let mut queue: VecDeque<(String, u8)> = VecDeque::new();
+        queue.push_back((initial_clean_id, 0));
+
+        let hop_limit = max_hops.clamp(1, 6);
+
+        while let Some((curr_id, current_hop)) = queue.pop_front() {
+            if current_hop >= hop_limit {
+                continue;
+            }
+
+            let curr_id_full = format!("node:{}", curr_id);
+
+            // Fetch outgoing and incoming edges safely with parameter binding
+            let mut response = self.db
+                .query("SELECT * FROM edge WHERE source = $nid OR target = $nid")
+                .bind(("nid", curr_id_full))
+                .await?;
+
+            let found_edges: Vec<RelationalEdge> = response.take(0)?;
+            for edge in found_edges {
+                if !visited_edges.contains(&edge.id) {
+                    visited_edges.insert(edge.id.clone());
+                    edges.push(edge.clone());
+                }
+
+                let neighbor_clean = if edge.source.contains(&curr_id) {
+                    edge.target.trim_start_matches("node:").to_string()
+                } else {
+                    edge.source.trim_start_matches("node:").to_string()
+                };
+
+                if !visited_nodes.contains(&neighbor_clean) {
+                    visited_nodes.insert(neighbor_clean.clone());
+                    if let Ok(Some(neighbor)) = self.get_node(&neighbor_clean).await {
+                        nodes.push(neighbor);
+                        if current_hop + 1 < hop_limit {
+                            queue.push_back((neighbor_clean, current_hop + 1));
+                        }
+                    }
+                }
+            }
+        }
         
         Ok((nodes, edges))
     }
     
-    /// Execute the sweep (decay pruning)
-    pub async fn sweep_decay(&self) -> Result<()> {
-        // Query to find nodes/edges where Retention < 0.05
-        // Since Surreal doesn't natively run our ebbinghaus math, we would fetch them,
-        // compute in Rust, and delete/update.
+    /// Execute the sweep (decay pruning) against live graph database
+    pub async fn sweep_decay(&self, decay_engine: &crate::engine::decay::DecayEngine) -> Result<usize> {
+        let mut nodes = self.get_all_nodes().await?;
+        let node_ids_to_prune = decay_engine.process_nodes_sweep(&mut nodes);
         
-        // Pseudo logic:
-        // 1. SELECT * FROM node WHERE locked = false
-        // 2. Compute R(t) in rust
-        // 3. Send DELETE or UPDATE commands back to SurrealDB
-        Ok(())
+        let mut node_retentions = std::collections::HashMap::new();
+        for node in &nodes {
+            node_retentions.insert(node.id.clone(), node.retention_probability());
+        }
+        
+        let mut edges = self.get_all_edges().await?;
+        let edge_ids_to_prune = decay_engine.process_edges_sweep(&mut edges, &node_retentions);
+        
+        let mut pruned_count = 0;
+        for nid in &node_ids_to_prune {
+            if self.delete_node(nid).await.is_ok() {
+                pruned_count += 1;
+            }
+        }
+        for eid in &edge_ids_to_prune {
+            if self.delete_edge(eid).await.is_ok() {
+                pruned_count += 1;
+            }
+        }
+        
+        Ok(pruned_count)
     }
 }

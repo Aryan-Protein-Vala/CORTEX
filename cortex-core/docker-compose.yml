@@ -5,7 +5,7 @@ services:
     image: 'docker.dragonflydb.io/dragonflydb/dragonfly'
     container_name: cortex-dragonfly
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     volumes:
       - dragonfly-data:/data
     command: >
@@ -15,8 +15,8 @@ services:
     image: qdrant/qdrant:latest
     container_name: cortex-qdrant
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant-data:/qdrant/storage
 
@@ -24,10 +24,10 @@ services:
     image: surrealdb/surrealdb:latest
     container_name: cortex-surrealdb
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - surrealdb-data:/surreal/db
-    command: start --log trace --user root --pass root file:/surreal/db
+    command: start --log trace --user root --pass cortex_god file:/surreal/db
 
 volumes:
   dragonfly-data:

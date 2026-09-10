@@ -30,9 +30,9 @@ impl DecayEngine {
         let mut to_prune = Vec::new();
         
         for edge in edges.iter_mut() {
-            // If the source or target node retention is extremely low, prune the edge
-            let source_r = node_retentions.get(&edge.source).unwrap_or(&1.0);
-            let target_r = node_retentions.get(&edge.target).unwrap_or(&1.0);
+            // If the source or target node retention is extremely low or missing, prune the edge
+            let source_r = node_retentions.get(&edge.source).unwrap_or(&0.0);
+            let target_r = node_retentions.get(&edge.target).unwrap_or(&0.0);
             
             if *source_r < 0.05 || *target_r < 0.05 {
                 to_prune.push(edge.id.clone());
