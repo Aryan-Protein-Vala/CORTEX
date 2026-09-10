@@ -99,7 +99,7 @@ function Neuron({ data, onClick }: { data: NeuronData; onClick: (n: NeuronData) 
       <Text
         position={[0, -(scale + 0.35), 0]}
         fontSize={0.25}
-        color={hovered ? 'var(--foreground)' : data.retention < 0.35 ? '#64748b' : 'var(--secondary)'}
+        color={hovered ? '#f59e0b' : data.retention < 0.35 ? '#94a3b8' : '#64748b'}
         anchorX="center"
         anchorY="top"
         font="/fonts/inter.woff"
