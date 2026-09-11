@@ -2,9 +2,9 @@
 /**
  * One version for the whole repo, or the release notes lie.
  *
- * This repo has ten version-carrying manifests (Rust crates, five package.json
- * files, the browser extension's manifest.json, tauri.conf.json, setup.py) and no
- * release automation to keep them honest. The failure
+ * This repo has fourteen version-carrying files: two Cargo.tomls, five package.json
+ * files, four package-locks, the extension's manifest.json, tauri.conf.json and
+ * setup.py. There is no release automation to keep them honest. The failure
  * mode is boring and permanent: README says v1.1, the extension says 1.0, and
  * the bug report nobody can triage. So the check is dumb and strict: every
  * manifest must carry the same version, and CHANGELOG.md must have an
@@ -31,10 +31,20 @@ const MANIFESTS = [
   { file: "cortex-desktop/src-tauri/Cargo.toml", kind: "cargo", label: "cortex-desktop (tauri crate)" },
   { file: "cortex-desktop/src-tauri/tauri.conf.json", kind: "npm", label: "cortex-desktop (bundle config)" },
   { file: "cortex-py/setup.py", kind: "python", label: "cortex-py" },
+  // Lockfiles carry the root package's version too; a stale one is how "the lock
+  // says 1.0.0 but the package says 0.1.0" bug reports start.
+  { file: "cortex-mcp/package-lock.json", kind: "lock", label: "cortex-mcp (lockfile)" },
+  { file: "cortex-js/package-lock.json", kind: "lock", label: "cortex-js (lockfile)" },
+  { file: "cortex-frontend/package-lock.json", kind: "lock", label: "cortex-frontend (lockfile)" },
+  { file: "cortex-desktop/package-lock.json", kind: "lock", label: "cortex-desktop (lockfile)" },
 ];
 
 const readVersion = (file, kind) => {
   const text = fs.readFileSync(path.join(ROOT, file), "utf8");
+  if (kind === "lock") {
+    const data = JSON.parse(text);
+    return data?.packages?.[""]?.version ?? data?.version ?? null;
+  }
   if (kind === "cargo") return text.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? null;
   if (kind === "python") return text.match(/version\s*=\s*"([^"]+)"/)?.[1] ?? null;
   return text.match(/"version"\s*:\s*"([^"]+)"/)?.[1] ?? null;
@@ -43,6 +53,16 @@ const readVersion = (file, kind) => {
 const writeVersion = (file, kind, next) => {
   const full = path.join(ROOT, file);
   const text = fs.readFileSync(full, "utf8");
+  if (kind === "lock") {
+    // Parse/stringify rather than regex: a lockfile has one version per package
+    // entry and a careless replace would rewrite thousands of them.
+    const data = JSON.parse(text);
+    if (data?.packages?.[""]) data.packages[""].version = next;
+    if (typeof data?.version === "string") data.version = next;
+    const out = JSON.stringify(data, null, 2) + "\n";
+    if (out !== text) fs.writeFileSync(full, out);
+    return out !== text;
+  }
   let out;
   if (kind === "cargo") out = text.replace(/^version\s*=\s*"[^"]+"/m, `version = "${next}"`);
   else if (kind === "python") out = text.replace(/version\s*=\s*"[^"]+"/, `version="${next}"`);

@@ -93,7 +93,14 @@ jobs:
 
           curl -fsS -X POST http://127.0.0.1:3030/v1/recall -H 'content-type: application/json' \
             -d '{"owner":"ci@local","query":"package manager","token_budget":600}' -o /tmp/recall.json
-          jq -e '.briefing or .context or .memories' /tmp/recall.json > /dev/null
+          # The token budget is the headline claim, so CI enforces it against the
+          # live binary instead of trusting the unit tests: the briefing must fit
+          # the budget it was given, and a 32-token budget must actually truncate.
+          jq -e '(.briefing | type) == "string"' /tmp/recall.json > /dev/null
+          jq -e '.tokens_used <= .token_budget' /tmp/recall.json > /dev/null
+          curl -fsS -X POST http://127.0.0.1:3030/v1/recall -H 'content-type: application/json' \
+            -d '{"owner":"ci@local","query":"package manager","token_budget":32}' -o /tmp/recall-tight.json
+          jq -e '.tokens_used <= 32 and .truncated == true' /tmp/recall-tight.json > /dev/null
           curl -fsS 'http://127.0.0.1:3030/v1/memories?owner=ci@local&limit=10' -o /tmp/memories.json
           jq -e 'has("memories") or type == "array"' /tmp/memories.json > /dev/null
           # Mesh publishing must be an explicit 501, never a silent no-op.
@@ -183,14 +190,10 @@ jobs:
           cache: npm
           cache-dependency-path: cortex-js/package-lock.json
       - run: npm ci --no-audit --no-fund
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - name: The published artifact must be importable
-        run: |
-          node -e "const m=require('./dist/index.cjs'); if(!m.CortexClient) throw new Error('CJS build has no CortexClient')"
-          node --input-type=module -e "import('./dist/index.js').then(m=>{if(!m.CortexClient) throw new Error('ESM build has no CortexClient')})"
-          test -f dist/index.d.ts
+      # `verify` = typecheck + contract tests + tsup/tsc build + dist audit
+      # (both module formats expose Cortex/Client/CortexError, .d.ts present,
+      # exports map points at files that exist).
+      - run: npm run verify
 
   sdk-py:
     name: cortex-py (stdlib client)

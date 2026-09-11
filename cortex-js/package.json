@@ -41,7 +41,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/test-client.mjs",
     "check": "npm run typecheck && npm test",
-    "prepublishOnly": "npm run check && npm run build"
+    "prepublishOnly": "npm run verify",
+    "verify": "npm run check && npm run build && node scripts/check-dist.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
