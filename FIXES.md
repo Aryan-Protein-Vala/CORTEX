@@ -140,15 +140,18 @@ Re-run everything with the commands in `AGENTS.md`.
    merge semantics mirror the bash version and the JSON handling is deliberately conservative
    (`ConvertFrom-Json`, BOM-less UTF-8, refuse-on-parse-error), but treat the first Windows run as
    a test: check the backup file appears and the other servers survive.
-4. **No CI run has happened yet, and this branch is not on GitHub.** The workflow was authored
-   blind (parsed with a YAML loader, only official actions, every step mapped to a suite that
-   exists). The push failed in this environment: `gh auth status` reports the `GH_TOKEN` is no
-   longer valid, so all five commits of this cycle (`5298a59`, `0ba2c19`, `f7d537f`, `f5e245a`,
-   `2971eab`) exist only in the local clone. Once the GitHub connection is reconnected and the
-   branch is pushed, start the first run with:
-   `git push origin arena/01a08ac5-cortex && gh workflow run ci.yml --ref arena/01a08ac5-cortex`
-   Until that run is green, findings 1 and 2 above stay open in the honest sense: the Rust is
-   reviewed, not compiled, and CI itself is unproven.
+4. **CI has been authored, pushed, and never executed.** The branch is on GitHub
+   (`arena/01a08ac5-cortex`, head `9be437f`, 8 commits from this cycle), and
+   `.github/workflows/ci.yml` parses with 9 jobs mapped onto suites that all exist.
+   But GitHub only *registers* workflow files present on the default branch, so
+   `gh workflow run ci.yml --ref <branch>` returns 404, and the sandbox token gets
+   `403 Resource not accessible by integration` on `…/actions/permissions` — it can
+   push refs, not manage settings. To get the first run: open a PR from this branch
+   (the `pull_request` trigger reads the workflow from the PR head — no merge needed),
+   or land `ci.yml` on `main`. Until that run is green, items 1 and 2 above stay open
+   in the honest sense: the Rust core and the Tauri app are reviewed, not compiled,
+   and the workflow itself is unproven.
+
 5. **Registry publishing is documented, not done.** `cortex-mcp` and `cortex-sdk` belong to other
    people; `cortex-js`, `cortex-py` and `cortex-core` names were checked as available but nothing
    was published (publishing needs accounts, 2FA and a decision about the `@cortex` scope).
@@ -159,9 +162,31 @@ Re-run everything with the commands in `AGENTS.md`.
 7. **The mesh is still 501 by design.** If you want `cortex://` federation for launch, that is a
    week of work (transport + moderation + per-user opt-in), not a flag flip.
 
+## Caught by re-running instead of remembering
+
+Three bugs in this cycle were only found by executing something rather than trusting
+a mental model of it — worth recording because they are the same failure mode the audit
+accused the codebase of:
+
+- The CI file asserted `require('./dist/index.cjs').CortexClient` on `cortex-js`. That class
+  has never existed; the SDK exports `Cortex` / `Client` / `CortexError`. The check would
+  have failed CI for no reason and taught nobody anything. The artifact audit now lives in
+  the package (`scripts/check-dist.mjs`, run as `npm run verify` and `prepublishOnly`).
+- `cortex-mcp/package-lock.json` still declared version `1.0.0` after the manifests were
+  unified. `scripts/check-versions.mjs` found it on its first run, which is the point of it
+  (it now covers 14 files, including lockfiles, and its rewrite mode leaves lockfiles
+  byte-identical apart from the version fields).
+- Earlier, `setup-cursor-mcp.sh` would overwrite an unparseable config instead of refusing,
+  and wrote `CORTEX_API_KEY: ""` when no key was set. Both were found by
+  `scripts/test-setup-merge.mjs`, not by reading the script.
+
+Rule for anyone continuing this: if a claim in this repo is checkable by running a command,
+run the command in the same session that writes the claim.
+
 ## Next, in the order that buys the most trust per hour
 
-1. Green CI on this branch (fixes 1–2 of the "never compiled" caveats).
+1. Green CI on this branch — needs a PR or the workflow on `main` (see above); it fixes the
+   "never compiled" caveats in items 1 and 2, and `cargo fmt` will land its own commit.
 2. Manual Chrome pass with a real core (60 min), then file the Chrome Web Store listing text
    that `cortex-extension/README.md` already drafts.
 3. Decide the npm story: `@cortex/mcp` scope, or publish `cortex-mcp-server` from this repo and
