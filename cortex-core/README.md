@@ -63,7 +63,7 @@ are exempt from every policy.
 ## Tests
 
 ```bash
-cargo test                       # 16 tests: engine invariants + HTTP contract (in-process router)
+cargo test                       # 61 tests: 44 unit + 17 integration (10 HTTP contract in-process + 7 engine)
 cargo clippy --all-targets       # lint (rustfmt/clippy come from ../../rust-toolchain.toml)
 cargo fmt --all                  # do it before you commit, not in CI
 ```

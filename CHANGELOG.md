@@ -36,6 +36,12 @@ launch that oversells dies in the first HN comment.
   recall, lock, forget, config), HTTP/transport failures mapped to the core's own error codes,
   `cortex:changed` / `cortex:deep-link` events, real CSP and window config, generated app icons,
   hand-written UI (`src/index.html`, `main.js`, `styles.css`) that only talks to Rust via `invoke`.
+- `cortex-core/README.md` (the crate had none) and a root `rust-toolchain.toml` pinning
+  `stable` + `rustfmt` + `clippy` for both Rust crates, so a fresh clone and CI get the same
+  toolchain without a setup script.
+- Corrected the test count quoted across README/FIXES/`cortex-core`: `cargo test` is
+  **61 tests** (44 unit in 9 modules + 17 integration: 10 HTTP contract, 7 engine), not the 16
+  an earlier draft of these docs claimed.
 - `scripts/verify-all.mjs`: one command that runs every suite in the repo and prints an explicit
   "unverified" block for anything it could not run (no cargo → the Rust core is named as skipped, not
   silently omitted). `--quick`, `--install`, `--only <id>`, `--list`.

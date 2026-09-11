@@ -18,7 +18,7 @@ PR, no merge to `main`.
 | `cortex-py` | `python3 -m unittest discover -s tests -t .` | **10/10** | same contract as the JS SDK with stdlib `urllib` only; header casing verified against a stub server |
 | `cortex-frontend` | `npm run verify` | green | `tsc --noEmit` with type checking **on**, 8 hydrate tests, `next build` (17 routes) |
 | `scripts/test-setup-merge.mjs` | node, no deps | **8/8** | installer merges instead of overwriting, backs up, refuses unparseable JSON, tolerates an empty file, idempotent, `--remove` keeps other servers, `--dry-run` writes nothing, fails loudly on a missing entry point |
-| `cortex-core` | `cargo test` | **cannot run here** | 16 tests written (6 engine invariants + 10 HTTP contract) but there is no `cargo` in this environment and rustup is unreachable. CI is the first real build |
+| `cortex-core` | `cargo test` | **cannot run here** | 61 tests written — 44 unit tests across 9 modules plus 17 integration (10 HTTP contract driving `build_router`, 7 engine invariants) — but there is no `cargo` in this environment and rustup is unreachable. CI is the first real build |
 | `cortex-desktop` | `cargo check` / `tauri build` | **cannot run here** | Rust commands + config + icons generated and visually checked; never compiled. CI runs `cargo check` |
 
 Re-run everything with the commands in `AGENTS.md`.
@@ -130,7 +130,7 @@ Re-run everything with the commands in `AGENTS.md`.
    `ai`, `engine`, `api`. What was done instead: a structurally-aware scan of all 22 files
    (comments, strings, raw strings, char literals and lifetimes masked, then bracket matching
    and open/close pairing verified) — clean. What CI adds: `cargo fmt --check`, `cargo clippy`,
-   `cargo test` (16 tests), a release build, an end-to-end smoke against the binary, and the
+   `cargo test` (61 tests), a release build, an end-to-end smoke against the binary, and the
    auth-gate test. Realistic first-run outcome: formatting diffs and a handful of borrow-checker
    or type fixes. Budget 1–3 hours of CI-driven fixes.
 2. **The Tauri app has never been compiled either** (and its `Cargo.lock` was not regenerated

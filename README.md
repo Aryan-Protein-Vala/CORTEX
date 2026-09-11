@@ -138,7 +138,7 @@ node scripts/verify-all.mjs --only mcp,js  # one surface after a change
 Individually:
 
 ```bash
-cd cortex-core     && cargo test                  # 16 tests: engine invariants + HTTP contract
+cd cortex-core     && cargo test                  # 61 tests: 44 unit + 17 integration (HTTP contract + engine)
 cd cortex-mcp      && npm run smoke               # 28 assertions over real stdio JSON-RPC
 cd cortex-extension && node scripts/test-harvest.mjs && node scripts/check-manifest.mjs
 cd cortex-js       && npm test                    # 9 contract tests against a stub core
