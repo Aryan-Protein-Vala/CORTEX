@@ -36,6 +36,9 @@ launch that oversells dies in the first HN comment.
   recall, lock, forget, config), HTTP/transport failures mapped to the core's own error codes,
   `cortex:changed` / `cortex:deep-link` events, real CSP and window config, generated app icons,
   hand-written UI (`src/index.html`, `main.js`, `styles.css`) that only talks to Rust via `invoke`.
+- Merged `main` (07a3fe4, the parallel implementation from the audit) into the working branch and
+  resolved all 17 conflicts in favour of the branch's wiring; the two engine tests that asserted on
+  logic copied into the test body now call `render_briefing` / `estimate_tokens` for real.
 - `cortex-core/README.md` (the crate had none) and a root `rust-toolchain.toml` pinning
   `stable` + `rustfmt` + `clippy` for both Rust crates, so a fresh clone and CI get the same
   toolchain without a setup script.

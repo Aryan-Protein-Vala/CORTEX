@@ -164,3 +164,51 @@ fn test_semantic_embedding_subword_stems() {
     assert!(sim > 0.7, "Stem/subword forms should have strong overlap, got {}", sim);
 }
 
+#[test]
+fn test_briefing_label_resolution() {
+    // Launch Audit 1.5: a briefing must read "Aryan -> [prefers] -> PostgreSQL", never
+    // "node:9f3c...". Rewritten from a duplicate that built its own label map inside the
+    // test and asserted on that — it stayed green while the crate could have been broken.
+    let user = MemoryNode::new("Aryan");
+    let db = MemoryNode::new("PostgreSQL");
+    let edge = RelationalEdge::new(&user.id, "prefers", &db.id, 0.95);
+
+    let (briefing, tokens_used, truncated) =
+        cortex_core::engine::recall::render_briefing(&[user, db], &[edge], 500);
+
+    assert!(
+        briefing.contains("Aryan -> [prefers] -> PostgreSQL"),
+        "labels did not reach the briefing: {briefing}"
+    );
+    assert!(!briefing.contains("node:"), "raw node ids leaked into the briefing: {briefing}");
+    assert!(tokens_used > 0, "tokens_used must be reported, not left at zero");
+    assert!(!truncated, "two nodes and one fact fit in 500 tokens");
+}
+
+#[test]
+fn test_token_budget_truncation() {
+    // Launch Audit 1.4: the token budget the MCP advertises has to be a ceiling the *core*
+    // enforces. Calls render_briefing directly; the version this replaced truncated the
+    // string inside the test body and asserted on its own work.
+    let nodes: Vec<MemoryNode> = (0..400)
+        .map(|i| {
+            MemoryNode::new(format!(
+                "memory {i} with a deliberately long label so the ceiling has to bite"
+            ))
+        })
+        .collect();
+
+    let (briefing, tokens_used, truncated) =
+        cortex_core::engine::recall::render_briefing(&nodes, &[], 60);
+
+    assert!(truncated, "400 long labels cannot fit in 60 tokens");
+    assert!(tokens_used <= 60, "budget ignored: emitted {tokens_used} tokens of 60");
+    // render_briefing trims the trailing newline off the string it returns but counts
+    // tokens on the untrimmed buffer, so the two estimates may differ by one token.
+    let emitted = cortex_core::types::estimate_tokens(&briefing);
+    assert!(
+        (tokens_used as i64 - emitted as i64).abs() <= 1,
+        "tokens_used ({tokens_used}) must account for the text actually emitted ({emitted})"
+    );
+    assert!(!briefing.is_empty(), "truncation must keep what fits, not drop the packet");
+}
