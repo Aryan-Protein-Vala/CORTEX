@@ -1,0 +1,34 @@
+name: Feature or change request
+description: Something you want built, or a claim in the docs you want made true.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is the problem you have today?
+      description: The workflow that hurts, not the feature name.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What should happen instead?
+      placeholder: |
+        `cortex_recall` should accept a relative budget ("half of what I asked for") so a long
+        session does not blow past the agent's context ceiling.
+    validations:
+      required: true
+  - type: textarea
+    id: surface
+    attributes:
+      label: Which surface, and what would the test look like?
+      description: Changes here need a runnable check (Rust test, smoke assertion, hydrate test). Say which.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope honesty
+      options:
+        - label: I understand mesh sync, hosted CORTEX, accounts and billing are explicitly not built, and asking for them here does not make the docs claim them.
+          required: true

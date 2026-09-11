@@ -54,7 +54,7 @@ actually read, per surface. The old version of that file listed Clerk and
 
 | Path | What it is | Status |
 | --- | --- | --- |
-| `cortex-core/` | Rust axum engine: capture, extraction, decay, recall, sessions, HTTP + WS | works, no infra; **not yet run through `cargo` in this environment** |
+| `cortex-core/` | Rust axum engine: capture, extraction, decay, recall, sessions, HTTP + WS — contract in [`cortex-core/API.md`](cortex-core/API.md) | works, no infra; **not yet run through `cargo` in this environment** |
 | `cortex-mcp/` | MCP server, 9 tools (`recall`, `remember`, `remember_turn`, `resolve`, `forget`, `lock`, `expand`, `ingest_project_files`, `status`) | works, `npm run smoke` → 28/28 |
 | `cortex-extension/` | Chrome MV3: consent-gated harvest of your own turns, memory chip, `Alt+Shift+C` composer inject | works, `node scripts/test-harvest.mjs` → 12/12, manifest checked |
 | `cortex-frontend/` | Next 16 marketing site + dashboard + 3D brain, talking to the core through a keyed proxy | works against any core; `npm run verify` green |
@@ -111,8 +111,8 @@ consent per site before a byte leaves the browser, and the dashboard's browser
 never sees the core's key (it proxies through `/api/core`).
 
 Forgetting is a policy, not a surprise. Default `CORTEX_DECAY_POLICY=soft`
-scores memory down; `hard` deletes it, and locked facts are never removed by
-either. `cortex-forget` in the editor is a two-step confirm for the same reason.
+scores memory down and flags it faded; `prune` deletes below the retention floor
+(`hard` and `delete` are accepted aliases), and locked facts are exempt from both. `cortex-forget` in the editor is a two-step confirm for the same reason.
 
 ## License
 
@@ -127,7 +127,15 @@ issue and we will dual-license rather than pretend the clause does not apply.
 
 ## Tests
 
-Every suite here runs without Docker, without a core, and without network:
+One command runs all of it and tells you what it could not run:
+
+```bash
+node scripts/verify-all.mjs --install      # 9 suites; skipped = loudly unverified
+node scripts/verify-all.mjs --quick        # skip the slow frontend build
+node scripts/verify-all.mjs --only mcp,js  # one surface after a change
+```
+
+Individually:
 
 ```bash
 cd cortex-core     && cargo test                  # 16 tests: engine invariants + HTTP contract

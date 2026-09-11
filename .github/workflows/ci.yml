@@ -92,20 +92,20 @@ jobs:
           test "$state" = "done" || { echo "job state was $state"; cat /tmp/core.log; exit 1; }
 
           curl -fsS -X POST http://127.0.0.1:3030/v1/recall -H 'content-type: application/json' \
-            -d '{"owner":"ci@local","query":"package manager","token_budget":600}' -o /tmp/recall.json
+            -d '{"owner":"ci@local","prompt":"package manager","token_budget":600}' -o /tmp/recall.json
           # The token budget is the headline claim, so CI enforces it against the
           # live binary instead of trusting the unit tests: the briefing must fit
           # the budget it was given, and a 32-token budget must actually truncate.
           jq -e '(.briefing | type) == "string"' /tmp/recall.json > /dev/null
           jq -e '.tokens_used <= .token_budget' /tmp/recall.json > /dev/null
           curl -fsS -X POST http://127.0.0.1:3030/v1/recall -H 'content-type: application/json' \
-            -d '{"owner":"ci@local","query":"package manager","token_budget":32}' -o /tmp/recall-tight.json
+            -d '{"owner":"ci@local","prompt":"package manager","token_budget":32}' -o /tmp/recall-tight.json
           jq -e '.tokens_used <= 32 and .truncated == true' /tmp/recall-tight.json > /dev/null
           curl -fsS 'http://127.0.0.1:3030/v1/memories?owner=ci@local&limit=10' -o /tmp/memories.json
           jq -e 'has("memories") or type == "array"' /tmp/memories.json > /dev/null
           # Mesh publishing must be an explicit 501, never a silent no-op.
           code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3030/v1/mesh/publish \
-            -H 'content-type: application/json' -d '{"owner":"ci@local","node_id":"x"}')
+            -H 'content-type: application/json' -d '{"nodes":[],"edges":[]}')
           test "$code" = "501" || { echo "expected 501 from mesh publish, got $code"; exit 1; }
 
           kill $pid; wait $pid 2>/dev/null || true

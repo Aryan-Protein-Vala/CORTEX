@@ -36,6 +36,22 @@ launch that oversells dies in the first HN comment.
   recall, lock, forget, config), HTTP/transport failures mapped to the core's own error codes,
   `cortex:changed` / `cortex:deep-link` events, real CSP and window config, generated app icons,
   hand-written UI (`src/index.html`, `main.js`, `styles.css`) that only talks to Rust via `invoke`.
+- `scripts/verify-all.mjs`: one command that runs every suite in the repo and prints an explicit
+  "unverified" block for anything it could not run (no cargo → the Rust core is named as skipped, not
+  silently omitted). `--quick`, `--install`, `--only <id>`, `--list`.
+- `SECURITY.md`: the real threat model instead of boilerplate — plaintext graph at rest, why `?key=`
+  exists and why to avoid it, recalled memory as durable prompt injection, what the rate limiter is
+  not, plus a hardening checklist for non-laptop deployments and a private-report path.
+- `cortex-core/API.md`: the HTTP contract written from the structs — field-level request/response
+  shapes, `NodeDto`/`EdgeDto`, why a node carries no stored `confidence`, 400 vs 422, the real
+  WebSocket frame kinds, and every route that answers 501 with its reason.
+- `.github/`: issue forms that ask for `/health` output and the commit under test, a PR template whose
+  checklist is the honesty rules from `AGENTS.md`, Dependabot for cargo + npm + actions (no pip:
+  `cortex-py` has zero dependencies), and config that routes security reports away from public issues.
+- `cortex-js/scripts/check-dist.mjs`: audits the *built* package (both module formats expose
+  `Cortex`/`Client`/`CortexError`, `Client` is an alias and not a copy, `.d.ts` files ship, the exports
+  map points at files that exist, no stray ESM in the CJS bundle). Runs as `npm run verify`, which is
+  what CI and `prepublishOnly` now call.
 - `scripts/check-versions.mjs`: refuses a release where the ten version-carrying manifests
   disagree (and a rewrite mode that bumps them all at once, leaving the CHANGELOG prose to a
   human). All surfaces unified at `0.1.0`, since nothing is published yet.
@@ -48,6 +64,13 @@ launch that oversells dies in the first HN comment.
 - `CHANGELOG.md`, `.env.example` rewritten to only variables the code reads, per surface.
 
 ### Changed
+- Decay policy is documented by its canonical value everywhere: `CORTEX_DECAY_POLICY=prune`
+  (`hard`/`delete` are accepted aliases of the same variant). The README, `.env.example`, both legal
+  pages and the FAQ had drifted to `hard`, which the core then reports back as `prune` — a reader
+  would go hunting for a value that "does not exist".
+- CI's core smoke step now uses the real request field (`prompt`, not `query`) and a body that
+  deserializes for `POST /v1/mesh/publish` (`{nodes, edges}`), so it asserts behaviour instead of
+  tripping a 4xx on a mistyped payload.
 - **Core rewrite for correctness:** one id derivation path for nodes/edges, owner-scoped reads and
   writes, token budget enforced in `recall::render_briefing` (with `truncated` surfaced), correction /
   overwrite handling in `apply_transcript` with store-confirmed counts, vector point ids tagged by

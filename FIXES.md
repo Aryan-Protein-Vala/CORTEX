@@ -162,6 +162,30 @@ Re-run everything with the commands in `AGENTS.md`.
 7. **The mesh is still 501 by design.** If you want `cortex://` federation for launch, that is a
    week of work (transport + moderation + per-user opt-in), not a flag flip.
 
+## Second pass: docs, gates and the CI that was never run
+
+- **`CORTEX_DECAY_POLICY` was documented with the wrong value.** `DecayPolicy::parse` maps
+  `prune | delete | hard` to the `Prune` variant, and `as_str()` reports `prune` — so `/health` and
+  the startup banner say `prune` while the README, `.env.example`, both legal pages and the FAQ told
+  people to set `hard`. Every doc now uses `prune` and names the aliases. (AGENTS.md had been
+  "corrected" to `hard` earlier in this session; that correction was itself the bug.)
+- **Two CI steps asserted fabricated payloads.** `POST /v1/recall` takes `prompt`, not `query`;
+  `POST /v1/mesh/publish` requires `{nodes, edges}`, so the old body would have 422'd before the
+  handler could answer the honest 501. Both fixed, and the recall assertions now check
+  `tokens_used <= token_budget` and `truncated == true` at a 32-token budget — the headline claim
+  enforced against the running binary, not only in unit tests.
+- **`scripts/verify-all.mjs`** runs all nine suites and prints an explicit `unverified` block for what
+  it could not execute; today that is 7 passed / 0 failed / 2 skipped (cargo absent → core + desktop).
+- **`cortex-core/API.md`** documents the HTTP surface from the structs: `NodeDto`/`EdgeDto` fields,
+  why a node has no stored `confidence` (edges carry it; retention is computed), 400 vs 422, the real
+  WS kinds (`WS_SYNAPSE_PULSE`, `WS_DECAY`, `sweep`, `ping`), inbound frames never read, and the 501 list.
+- **`SECURITY.md`** replaces boilerplate with the actual model: plaintext file at rest, `?key=`
+  rationale and warning, recalled memory as durable prompt-injection vector with what mitigates it,
+  rate limit ≠ ACL, and a hardening checklist.
+- **`.github/`**: issue forms (ask for `/health` + commit), PR template = the honesty checklist,
+  Dependabot for cargo/npm/actions. No `cortex-core/Cargo.lock` exists, so cargo entries resolve on
+  first run; `cortex-py` is excluded because it has zero dependencies.
+
 ## Caught by re-running instead of remembering
 
 Three bugs in this cycle were only found by executing something rather than trusting

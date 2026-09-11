@@ -14,8 +14,13 @@ extension, desktop app, web dashboard, JS/Python SDKs).
    made recall silently return nothing for the entire product.
 2. **Never delete user memory implicitly.** Forgetting is a score
    (`retention_probability`) and a `fading` flag. Physical deletion happens only
-   under `CORTEX_DECAY_POLICY=hard` (the values are `off | soft | hard`, default
-   `soft`) or an explicit user `DELETE`. Locked nodes are exempt from both.
+   under `CORTEX_DECAY_POLICY=prune` or an explicit user `DELETE`. Locked nodes are
+   exempt from both. The accepted values and what each does: `off` (also `none`,
+   `rank-only`) never mutates; `soft` (default) flags `fading` below retention
+   0.25 and depresses edge weights; `prune` (also `hard`, `delete`) deletes below
+   0.05. The canonical string the core reports (`/health.decay_policy`, the startup
+   banner) is `prune`, so docs and UI must say `prune` — writing `hard` makes
+   readers hunt for a value that does not exist in the output.
 3. **Errors are HTTP errors.** Handlers return `Result<_, ApiError>` with a
    `code`; a 200 body that says `"error"` is banned. MCP tools must set
    `isError: true`.
@@ -65,6 +70,9 @@ extension, desktop app, web dashboard, JS/Python SDKs).
 | `cortex2.md` | Product spec. Treat it as the target, not as status. |
 
 ## Commands
+
+Everything below is wrapped by `node scripts/verify-all.mjs [--quick|--install|--only <id>]`,
+which prints what it could not run instead of counting it as a pass.
 
 ```bash
 # core — the only surface that needs a toolchain (Rust); no Docker required
@@ -142,6 +150,8 @@ release binary (health → ingest → job → recall → mesh 501) and an auth-g
 - Frontend proxy allowlist + key injection: `cortex-frontend/app/api/core/[...path]/route.ts`.
 - Contact form persistence (honeypot, rate limit, 503 when unwritable):
   `cortex-frontend/app/api/contact/route.ts` → `CORTEX_CONTACT_FILE`.
+- HTTP contract (request/response fields, 400 vs 422, DTO shapes, `501` list): `cortex-core/API.md`,
+  written from the structs. Update it in the same commit as a route or DTO change.
 - Marketing-site analytics is opt-in: `NEXT_PUBLIC_SITE_ANALYTICS=1` and nothing
   otherwise (`components/analytics.tsx`). The privacy page documents both modes.
 

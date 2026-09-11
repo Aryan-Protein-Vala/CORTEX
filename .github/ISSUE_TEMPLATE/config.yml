@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security issue (private)
+    url: https://github.com/Aryan-Protein-Vala/CORTEX/security/advisories/new
+    about: Do not open a public issue for anything that exposes memory data, keys or the auth gate. See SECURITY.md.

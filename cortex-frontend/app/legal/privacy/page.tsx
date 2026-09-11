@@ -118,10 +118,10 @@ export default function PrivacyPage() {
         <Section n="5" title="Forgetting, deletion and export">
           <p>
             Memory decay in CORTEX is a scoring function, not a shredder. At the default policy
-            (<code>CORTEX_DECAY_POLICY=soft</code>) an old memory is ranked out of your briefings but
-            stays in the file. Only if you explicitly set <code>hard</code> are sub-threshold memories
-            (retention below 0.05) actually pruned, and locked memories are never removed under any
-            policy. Forgetting is meant to be reversible unless you chose otherwise.
+            (<code>CORTEX_DECAY_POLICY=soft</code>) an old memory is flagged faded and ranked out of
+            your briefings but stays in the file. Only if you explicitly set
+            <code>CORTEX_DECAY_POLICY=prune</code> are memories below the retention floor of 0.05
+            deleted, and locked memories are never removed under any policy. Forgetting is meant to be reversible unless you chose otherwise.
           </p>
           <p>
             Delete anything yourself with <code>cortex_forget</code> in your editor, the trash button in

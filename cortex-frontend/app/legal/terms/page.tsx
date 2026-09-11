@@ -98,7 +98,7 @@ export default function TermsPage() {
             CORTEX is provided as is, with no warranty, to the maximum extent the law allows. It will
             score your memories down over time; by default that is a ranking change and not a deletion,
             and deletion of sub-threshold memories only happens if you set{' '}
-            <code>CORTEX_DECAY_POLICY=hard</code>. Locked memories are never forgotten by the machine.
+            <code>CORTEX_DECAY_POLICY=prune</code>. Locked memories are never forgotten by the machine.
             If an algorithm drops something you cared about, that is a bad day, a bug report, and your
             backup&rsquo;s job — <code>GET /v1/export</code> exists so losing this repo costs you nothing.
           </p>
