@@ -829,12 +829,14 @@ async fn ingest_context(
     let st = state.clone();
 
     let job_for_task = job_id.clone();
+    // The spawned task owns what it touches, so the caller keeps its own copy for the response body.
+    let owner_for_task = owner.clone();
     let wait = payload.wait.unwrap_or(false);
     let impact_floor = payload.impact_floor();
     let handle = tokio::spawn(async move {
         let _permit = permit;
         set_job(&st, &job_for_task, JobState::Running, None, None);
-        let outcome = apply_transcript(&st, &transcript, &owner, &provenance, impact_floor).await;
+        let outcome = apply_transcript(&st, &transcript, &owner_for_task, &provenance, impact_floor).await;
         match outcome {
             Ok(report) => {
                 set_job(&st, &job_for_task, JobState::Done, Some(report), None);
@@ -998,11 +1000,12 @@ async fn apply_transcript(
         let mut touched: Vec<MemoryNode> = Vec::new();
         for entity in [triplet.subject.clone(), triplet.object.clone()] {
             let id = crate::types::node_id_for_label(&entity);
-            let (mut node, _is_new) = match local_index
-                .get(&id)
-                .cloned()
-                .or_else(|| state.store.get_node(&id).await.ok().flatten())
-            {
+            // Not `or_else(|| ... .await)`: a sync closure cannot await.
+            let known = match local_index.get(&id).cloned() {
+                Some(hit) => Some(hit),
+                None => state.store.get_node(&id).await.ok().flatten(),
+            };
+            let (mut node, _is_new) = match known {
                 Some(existing) => (existing, false),
                 None => {
                     let fresh = MemoryNode::with_owner(entity.clone(), owner);
@@ -1060,7 +1063,7 @@ async fn apply_transcript(
         for triplet in corrections.iter() {
             let src = canonical_node_id(&triplet.subject);
             let tgt = canonical_node_id(&triplet.object);
-            if let Ok(Some(created)) = state.apply_overwrite(triplet, &src, &tgt, &mut scratch) {
+            if let Ok(Some(created)) = state.apply_overwrite(triplet, &src, &tgt, &mut scratch).await {
                 edges_out.push(created);
             }
         }

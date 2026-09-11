@@ -11,8 +11,8 @@
 
 use crate::storage::graph_store::GraphStore;
 use crate::types::{
-    estimate_tokens, is_global_mesh, normalize_label, normalize_owner, strip_id_prefix,
-    MemoryNode, RelationalEdge, DEFAULT_OWNER, GLOBAL_MESH_OWNER,
+    estimate_tokens, is_global_mesh, normalize_label, normalize_owner, MemoryNode, RelationalEdge,
+    GLOBAL_MESH_OWNER,
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -264,7 +264,7 @@ pub fn render_briefing(
     let mut used = 0u32;
     let mut truncated = false;
 
-    let mut push = |line: &str, out: &mut String, used: &mut u32, truncated: &mut bool| -> bool {
+    let push = |line: &str, out: &mut String, used: &mut u32, truncated: &mut bool| -> bool {
         let candidate_len = estimate_tokens(&format!("{out}{line}\n"));
         if candidate_len > budget {
             *truncated = true;

@@ -508,14 +508,18 @@ pub struct ProceduralRule {
 
 impl ProceduralRule {
     pub fn new(trigger_context: impl Into<String>, directive: impl Into<String>, owner: &str) -> Self {
+        // Converted once: `impl Into<String>` is consumed by the first .into(), and the rule id
+        // needs the same text the fields store.
+        let trigger_context = trigger_context.into();
+        let directive = directive.into();
         Self {
             rule_id: format!("rule:{}", &hex_sha256(&format!(
                 "{}\u{1}{}",
-                normalize_label(&trigger_context.into()),
-                normalize_label(&directive.into())
+                normalize_label(&trigger_context),
+                normalize_label(&directive)
             ))[..32]),
-            trigger_context: trigger_context.into(),
-            absolute_directive: directive.into(),
+            trigger_context,
+            absolute_directive: directive,
             created_at: Utc::now().timestamp(),
             origin: "shadow_kernel".to_string(),
             owner_uri: normalize_owner(owner),
@@ -759,7 +763,7 @@ mod tests {
     fn triplet_sanitizing_clamps_untrusted_llm_output() {
         let raw = SemanticTriplet {
             subject: "  Alice ".into(),
-            predicate: "Likes Apples ",
+            predicate: "Likes Apples ".into(),
             object: "Apples".into(),
             confidence: -3.0,
             impact: 0,

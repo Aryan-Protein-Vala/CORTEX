@@ -99,7 +99,8 @@ impl FileGraphStore {
         tokio::fs::write(&tmp, &payload)
             .await
             .with_context(|| format!("writing {}", tmp.display()))?;
-        tokio::fs::rename(&tmp, &self.path)
+        // &* : Arc<PathBuf> derefs to PathBuf, which is what AsRef<Path> is implemented on.
+        tokio::fs::rename(&tmp, &*self.path)
             .await
             .with_context(|| format!("renaming {} -> {}", tmp.display(), self.path.display()))?;
         Ok(())

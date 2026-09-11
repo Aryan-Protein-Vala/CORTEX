@@ -68,6 +68,8 @@ pub struct SweepPlan {
     pub prune_edge_ids: Vec<String>,
 }
 
+// Derived because CoreConfig owns this by value and derives Clone + Debug.
+#[derive(Debug, Clone)]
 pub struct DecayEngine {
     pub policy: DecayPolicy,
 }

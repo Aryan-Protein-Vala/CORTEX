@@ -60,6 +60,8 @@ impl SessionBuffer {
         provenance: &str,
     ) -> bool {
         let mut inner = self.inner.lock().await;
+        let mut full = false;
+        {
         let entry = inner
             .sessions
             .entry(session_id.to_string())
@@ -73,7 +75,11 @@ impl SessionBuffer {
             let overflow = entry.messages.len() - self.max_messages;
             entry.messages.drain(0..overflow);
         }
+        full = entry.messages.len() >= self.max_messages;
+        }
 
+        // `entry` is out of scope here: the &mut borrow of inner.sessions has to end before the
+        // order/counter bookkeeping below, or the borrow checker sees two live mutable borrows.
         inner.inserted += 1;
         inner.order.insert(session_id.to_string(), inner.inserted);
         if inner.sessions.len() > self.max_sessions {
@@ -89,7 +95,7 @@ impl SessionBuffer {
             }
         }
 
-        entry.messages.len() >= self.max_messages
+        full
     }
 
     /// Pops every session that has been idle long enough to be considered over.

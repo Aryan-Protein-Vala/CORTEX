@@ -264,6 +264,9 @@ impl VectorIndex {
 
     /// Drop the vectors for deleted nodes, so recall can never surface a
     /// dangling id whose node is gone.
+    ///
+    /// The count is the number of point ids *submitted*: Qdrant's `UpdateResult` carries an
+    /// operation id and a status, not a per-point tally, so anything more precise would be made up.
     pub async fn delete_for_nodes(&self, node_ids: &[String]) -> Result<usize> {
         if node_ids.is_empty() {
             return Ok(0);
@@ -272,12 +275,10 @@ impl VectorIndex {
             .iter()
             .map(|id| PointId::from(point_id_for(id)))
             .collect();
+        let submitted = ids.len();
         let request = DeletePointsBuilder::new(&self.collection_name).points(ids).build();
-        let response = self.client.delete_points(request).await?;
-        Ok(response
-            .result
-            .map(|r| r.deleted as usize)
-            .unwrap_or(0))
+        self.client.delete_points(request).await?;
+        Ok(submitted)
     }
 }
 

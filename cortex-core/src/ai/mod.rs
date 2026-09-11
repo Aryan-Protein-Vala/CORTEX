@@ -56,7 +56,7 @@ pub fn push_triplet(
     }
 }
 
-fn heuristic_triplets(text: &str) -> Vec<SemanticTriplet> {
+pub fn heuristic_triplets(text: &str) -> Vec<SemanticTriplet> {
     const NEEDLES: &[(&str, &str, u8)] = &[
         (" prefers ", "prefers", 7),
         (" doesn't like ", "dislikes", 7),
