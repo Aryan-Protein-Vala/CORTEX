@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CORTEX \u2014 memory for your AI chat",
-  "version": "1.1.0",
+  "version": "0.1.0",
   "description": "Turns ChatGPT, Claude and Gemini chats into a local memory graph, then injects your preferences back as context.",
   "minimum_chrome_version": "111",
   "icons": {

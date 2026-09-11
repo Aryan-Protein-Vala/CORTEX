@@ -86,8 +86,10 @@ cd cortex-frontend && npm run dev:mock                    # dashboard against sc
 cd cortex-js && npm test && npm run build                 # 9 contract tests, ESM+CJS+d.ts
 cd cortex-py && python3 -m unittest discover -s tests -t . # 10 tests, stdlib only
 
-# installer safety
+# installer safety + repo hygiene
 node scripts/test-setup-merge.mjs                         # 8 tests, no deps
+node scripts/check-versions.mjs                           # all 10 manifests agree on one version
+node scripts/check-versions.mjs 0.2.0                     # rewrite them (CHANGELOG entry is yours)
 
 # desktop (needs a built core binary first)
 cd cortex-core && cargo build --release --bin cortex-core
@@ -179,7 +181,10 @@ config merge safety (`scripts/test-setup-merge.mjs`).
 - Nothing under `@cortex/*` exists on npm; do not write install snippets that
   assume it does.
 - Version bumps go in `Cargo.toml`, `package.json` and `cortex-py/setup.py`
-  together, plus a line in `CHANGELOG.md`, or not at all.
+  together, plus a line in `CHANGELOG.md`, or not at all. `node
+  scripts/check-versions.mjs` enforces this (CI runs it): ten manifests, one
+  version. Everything currently sits at `0.1.0` because nothing is published —
+  do not bump a single package to 1.x "to look serious".
 - Do not commit `node_modules`, `target/`, `.next/`, or a generated
   `.cursor/mcp.json` (machine-specific absolute path; `.cursor/mcp.json.example`
   is the committed template).

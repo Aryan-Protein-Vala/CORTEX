@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="cortex-py",
-    version="1.1.0",
+    version="0.1.0",
     description="CORTEX core client for Python: remember(), recall() and the cortex:// graph resolver. Standard library only.",
     long_description=open("README.md").read() if __import__("os").path.exists("README.md") else "",
     long_description_content_type="text/markdown",

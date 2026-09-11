@@ -1,6 +1,6 @@
 {
   "name": "cortex-extension",
-  "version": "1.1.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Chrome extension that feeds AI chat conversations into a local CORTEX core. No build step: load unpacked.",
   "scripts": {

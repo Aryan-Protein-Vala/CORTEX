@@ -1,6 +1,6 @@
 {
   "name": "cortex-mcp",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "MCP server that gives Cursor, Claude Desktop and Windsurf persistent memory backed by a local CORTEX core.",
   "main": "index.js",
   "bin": {

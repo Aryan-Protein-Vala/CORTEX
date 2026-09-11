@@ -1,6 +1,6 @@
 {
   "name": "cortex-js",
-  "version": "1.1.0",
+  "version": "0.1.0",
   "description": "CORTEX core client for TypeScript and JavaScript: remember(), recall(), and the cortex:// graph resolver.",
   "license": "AGPL-3.0-or-later",
   "private": true,

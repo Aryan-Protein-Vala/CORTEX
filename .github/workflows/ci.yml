@@ -245,6 +245,18 @@ jobs:
       # Merging, backups, refusal on broken JSON, idempotency, --remove, --dry-run.
       - run: node scripts/test-setup-merge.mjs
 
+  hygiene:
+    name: repo hygiene (versions agree, manifests parse)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Ten manifests carry a version. Without this check they drift within a week.
+      - run: node scripts/check-versions.mjs
+
   desktop:
     name: cortex-desktop (tauri config + cargo check)
     runs-on: ubuntu-latest

@@ -36,6 +36,9 @@ launch that oversells dies in the first HN comment.
   recall, lock, forget, config), HTTP/transport failures mapped to the core's own error codes,
   `cortex:changed` / `cortex:deep-link` events, real CSP and window config, generated app icons,
   hand-written UI (`src/index.html`, `main.js`, `styles.css`) that only talks to Rust via `invoke`.
+- `scripts/check-versions.mjs`: refuses a release where the ten version-carrying manifests
+  disagree (and a rewrite mode that bumps them all at once, leaving the CHANGELOG prose to a
+  human). All surfaces unified at `0.1.0`, since nothing is published yet.
 - `scripts/test-setup-merge.mjs`: 8 tests proving the installer merges editor configs instead of
   overwriting them, refuses unparseable JSON, backs up before writing, is idempotent, and removes
   only its own entry.
