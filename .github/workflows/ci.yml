@@ -309,6 +309,9 @@ jobs:
           node-version: "20"
       # Ten manifests carry a version. Without this check they drift within a week.
       - run: node scripts/check-versions.mjs
+      # Committed node_modules is how this repo produced a 3,600-file diff by accident: .gitignore
+      # does not apply to paths git already tracks, so the only defence is a check on git ls-files.
+      - run: node scripts/check-no-vendored.mjs
 
   desktop:
     # Requested so a failing Rust job can publish its own diagnostics (see

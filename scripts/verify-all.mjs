@@ -27,6 +27,12 @@ const values = args.filter((a) => !a.startsWith("--"));
 
 const SUITES = [
   {
+    id: "vendored",
+    title: "repo hygiene (no vendored node_modules or build output in git)",
+    cwd: ".",
+    cmd: ["node", "scripts/check-no-vendored.mjs"],
+  },
+  {
     id: "hygiene",
     title: "repo hygiene (versions agree across all manifests)",
     cwd: ".",
