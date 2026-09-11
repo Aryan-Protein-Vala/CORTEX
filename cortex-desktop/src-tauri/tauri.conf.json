@@ -3,10 +3,6 @@
   "productName": "CORTEX",
   "version": "0.1.0",
   "identifier": "com.aryansharma.cortex-desktop",
-  "build": {
-    "frontendDist": "../src",
-    "removeUnusedCommands": true
-  },
   "app": {
     "withGlobalTauri": true,
     "windows": [
@@ -26,20 +22,12 @@
       }
     ],
     "security": {
-      "csp": {
-        "default-src": "'self'",
-        "script-src": "'self'",
-        "style-src": "'self' 'unsafe-inline'",
-        "img-src": "'self' data:",
-        "font-src": "'self' data:",
-        "connect-src": "'self' ipc: http://ipc.localhost",
-        "object-src": "'none'",
-        "base-uri": "'self'",
-        "frame-src": "'none'",
-        "worker-src": "'self'",
-        "form-action": "'none'"
-      }
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:3030 ws://127.0.0.1:3030; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     }
+  },
+  "build": {
+    "frontendDist": "../src",
+    "removeUnusedCommands": true
   },
   "bundle": {
     "active": true,
@@ -91,8 +79,5 @@
         ]
       }
     }
-  },
-  "security": {
-    "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:3030 ws://127.0.0.1:3030; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
   }
 }

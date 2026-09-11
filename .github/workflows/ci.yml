@@ -335,18 +335,10 @@ jobs:
             libjavascriptcoregtk-4.1-dev libssl-dev libgtk-3-dev
       - run: cd cortex-desktop && npm ci --no-audit --no-fund
       - name: Validate tauri.conf.json
-        # A missing key used to throw a TypeError, which read as "the validator broke"
-        # rather than "your config is wrong". Each rule now says what to fix.
-        run: |
-          node -e '
-          const c = require("./cortex-desktop/src-tauri/tauri.conf.json");
-          const fail = (m) => { console.error("tauri.conf.json: " + m); process.exit(1); };
-          const sec = c.security || {};
-          if (!sec.csp) fail("security.csp is missing; the webview can reach the core over 127.0.0.1, so it needs a policy");
-          if (!/script-src[^;]*self/.test(sec.csp)) fail("csp must pin script-src, otherwise an injected script owns the API key");
-          if (!c.app || !(c.app.windows || []).length) fail("app.windows is empty; the app would launch with no window");
-          if (c.build && c.build.devUrl) fail("devUrl is committed; the release build would load a dev server");
-          '
+        # A tracked script, not an inline `node -e`: the inline version passed a config with
+        # `security` at the root (wrong place; the build script rejected it) because a validator
+        # you cannot run locally and cannot test against a bad fixture only checks what it remembers.
+        run: node cortex-desktop/scripts/validate-tauri-config.mjs
       # A full bundle needs Apple/Windows signing we deliberately do not fake in
       # CI, so the gate is the Rust type-check plus the config audit above.
       - name: cargo check

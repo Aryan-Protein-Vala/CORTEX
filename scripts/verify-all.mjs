@@ -85,6 +85,13 @@ const SUITES = [
     needsNode: "22.6",
   },
   {
+    id: "desktop-config",
+    title: "cortex-desktop: tauri.conf.json gate (CSP, schema keys, dist, icons)",
+    cwd: "cortex-desktop",
+    cmd: ["node", "scripts/validate-tauri-config.mjs"],
+    deps: false,
+  },
+  {
     id: "desktop",
     title: "cortex-desktop: cargo check (Tauri Rust side)",
     cwd: "cortex-desktop/src-tauri",

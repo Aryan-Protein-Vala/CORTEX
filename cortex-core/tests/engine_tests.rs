@@ -67,6 +67,9 @@ fn test_overwrite_engine_conflict_resolution() {
         confidence: 0.98,
         impact: 9,
         overwrite: true,
+        // Set explicitly rather than ..Default::default(): this crate treats a triplet's natural
+        // language rendering as provenance, and a test should not inherit it by accident.
+        sentence: String::new(),
     };
 
     let result = overwrite.apply_overwrite(
@@ -89,18 +92,24 @@ fn test_overwrite_engine_conflict_resolution() {
 #[test]
 fn test_context_packet_serialization() {
     let node = MemoryNode::new("SurrealDB");
-    let packet = CortexContextPacket {
-        user_id: "test_user".to_string(),
-        nodes: vec![node],
-        edges: vec![],
-        rules: vec![],
-        token_estimate: 500,
-        context: "SurrealDB memory graph context".to_string(),
-    };
+    // Built through CortexContextPacket::empty instead of a struct literal: the literal broke the
+    // moment the packet grew a field (it did: briefing / generated_at / memories_found /
+    // truncated), and it silently skipped the defaults the real constructor applies.
+    let mut packet = CortexContextPacket::empty("test_user", 500);
+    packet.nodes = vec![node];
+    packet.memories_found = 1;
+    packet.briefing = "SurrealDB memory graph context".to_string();
 
     let json = serde_json::to_string(&packet).expect("Failed to serialize");
     assert!(json.contains("SurrealDB"));
     assert!(json.contains("test_user"));
+    // The MCP and both SDKs re-parse this shape, so serialization is only half the contract.
+    let back: CortexContextPacket = serde_json::from_str(&json).expect("round trip");
+    assert_eq!(back.user_id, packet.user_id);
+    assert_eq!(back.token_budget, 500);
+    assert_eq!(back.memories_found, 1);
+    assert_eq!(back.context, "https://cortex.dev/ns/memory@2");
+    assert!(back.generated_at.is_some(), "a packet without a timestamp cannot be decayed");
 }
 
 #[test]
