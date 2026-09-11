@@ -410,3 +410,13 @@ as an unknown field — the config was written against a newer Tauri schema than
 `installModes: ["perUser"]` is that crate's default anyway, so the field is dropped rather than
 renamed into a shape I cannot verify, and `cargo update` in `cortex-desktop/src-tauri` is the way to
 get the option back if a per-machine installer is ever wanted.
+---
+
+## Sixth pass: the desktop crate's last 2 errors, and the frontend's hidden landmine
+
+**`cortex-desktop/src-tauri/src/lib.rs` — `error[E0599]: no method named \`query\` found for struct \`RequestBuilder\``.** reqwest 0.13 moved `serde_urlencoded` behind an optional feature, so `query()` is not part of what our `features = ["json"]` guarantees. Two ways out: add a feature name I could not verify from here (no cargo, and crates.io's API is unreachable), or stop calling the method. Three parameters across two call sites, so I hand-encoded them (`encode_query`), with the unreserved set taken from RFC 3986. The encoder is checked against Node's `URLSearchParams` for exactly the strings this app produces — `cortex://default`, `cortex://user#memory-1` — and agrees (`%20` where the form-encoded convention would emit `+`, which is the correct form inside a URL path+query and decodes the same in axum). Comment says why, so the next person does not "simplify" it back to `.query()`.
+
+**`cortex-frontend/components/synaptic-network.tsx` — deleted, 454 lines, imported by nothing.** It was the old 2D brain: fabricated neurons as the *default* state and a hardcoded `http://localhost:3030/v1/resolve` plus `ws://localhost:3030/ws`, bypassing the `/api/core` proxy and the API key. After `/dashboard/brain` was rewritten, it stayed behind as a landmine: wire it up and the dashboard shows fake memories and fails with mixed content on any https deploy. `components/ui/button.tsx` (the shadcn leftover the README already claimed was gone) went with it, along with `class-variance-authority`, which nothing else used. `tsc --noEmit` and `next build` pass after the deletion.
+
+**`.github/workflows/ci.yml` — my own insertion produced invalid YAML.** I spliced a step in with a string slice and lost the indentation; caught by parsing the file with a YAML parser locally rather than pushing it blind. Lesson recorded where it belongs: any edit to a workflow ends with a parse, not a look.
+

@@ -76,6 +76,36 @@ async fn send(
     }
 }
 
+/// Percent-encode a query string by hand.
+///
+/// reqwest 0.13 made `serde_urlencoded` optional, so `RequestBuilder::query` is not part of the
+/// API our feature set (`json`) guarantees — CI reported "no method named `query` found for
+/// struct `RequestBuilder`", and there is no compiler here to discover which feature would restore
+/// it. Three parameters across two call sites: encoding them inline removes a version-dependent
+/// method instead of adding an unverifiable feature name. Unreserved set per RFC 3986, everything
+/// else %XX — which is what `cortex://…` URIs need anyway (':', '/' and '#' are not literal-safe).
+fn encode_query(pairs: &[(&str, &str)]) -> String {
+    const UNRESERVED: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    let mut out = String::new();
+    for (index, (key, value)) in pairs.iter().enumerate() {
+        if index > 0 {
+            out.push('&');
+        }
+        for piece in [(*key), (*value)] {
+            for byte in piece.as_bytes() {
+                if UNRESERVED.contains(byte) {
+                    out.push(*byte as char);
+                } else {
+                    out.push_str(&format!("%{byte:02X}"));
+                }
+            }
+            out.push('=');
+        }
+        out.pop();
+    }
+    out
+}
+
 fn with_key(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
     match std::env::var("CORTEX_API_KEY") {
         Ok(key) if !key.trim().is_empty() => request.header("x-cortex-key", key.trim()),
@@ -99,11 +129,8 @@ async fn core_stats() -> Result<Value, String> {
 async fn core_list(limit: Option<u32>) -> Result<Value, String> {
     let owner = core_owner();
     let limit = limit.unwrap_or(50).to_string();
-    let request = with_key(
-        client()?
-            .get(format!("{}/v1/memories", core_base()))
-            .query(&[("owner", owner.as_str()), ("limit", limit.as_str())]),
-    );
+    let query = encode_query(&[("owner", owner.as_str()), ("limit", limit.as_str())]);
+    let request = with_key(client()?.get(format!("{}/v1/memories?{query}", core_base())));
     send(request).await
 }
 
@@ -216,10 +243,9 @@ pub fn run() {
                         let uri = url.trim_start_matches("cortex://open?uri=").to_string();
                         let outcome = match client() {
                             Ok(http) => {
-                                let request = with_key(
-                                    http.get(format!("{}/v1/resolve", core_base()))
-                                        .query(&[("uri", uri.as_str())]),
-                                );
+                                let query = encode_query(&[("uri", uri.as_str())]);
+                                let request =
+                                    with_key(http.get(format!("{}/v1/resolve?{query}", core_base())));
                                 send(request).await
                             }
                             Err(error) => Err(error),
