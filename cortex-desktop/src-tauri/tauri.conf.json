@@ -62,9 +62,6 @@
         "type": "downloadBootstrapper"
       },
       "nsis": {
-        "installModes": [
-          "perUser"
-        ],
         "displayLanguageSelector": false
       }
     },

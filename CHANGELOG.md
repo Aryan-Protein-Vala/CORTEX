@@ -36,6 +36,9 @@ launch that oversells dies in the first HN comment.
   recall, lock, forget, config), HTTP/transport failures mapped to the core's own error codes,
   `cortex:changed` / `cortex:deep-link` events, real CSP and window config, generated app icons,
   hand-written UI (`src/index.html`, `main.js`, `styles.css`) that only talks to Rust via `invoke`.
+- `cortex-core`: fixed the two follow-on errors my first pass introduced (a dead initial assignment,
+  and a `MutexGuard` borrowed twice by `order.insert(id, inserted)`); `cortex-desktop` now drops the
+  `nsis.installModes` field that the pinned `tauri-build` schema does not know (it was the default).
 - `cortex-core`: the ten compile errors CI's own `cargo test` reported are fixed — a missing
   `#[derive(Debug, Clone)]` on `DecayEngine`, `Arc<PathBuf>` fed to `tokio::fs::rename`, an `.await`
   inside the sync closure passed to `or_else`, an unawaited `apply_overwrite`, two moved-value errors

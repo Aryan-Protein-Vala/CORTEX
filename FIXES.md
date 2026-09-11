@@ -395,3 +395,18 @@ Deferred, deliberately: `cargo fmt` produced 81 KB of diffs (`/tmp/fmt.log`, als
 `Format` and `Clippy` stay `continue-on-error` while compile errors exist — cosmetic churn and real
 bugs must not be fixed in the same commit. Once the crate compiles and tests pass, the fmt patch can
 be applied in one pass and both gates flipped to fatal.
+
+## Seventh pass: the second CI round, and what a fast loop is actually for
+
+Round 2 dropped `cortex-core` from 10 compile errors to **2 — both introduced by my own fix** from
+round 1, which is the point of having the loop instead of reasoning: scoping the `entry` borrow left
+`let mut full = false;` dead before it was read (unused-assignments, fatal here), and
+`inner.order.insert(id, inner.inserted)` borrows the `MutexGuard` mutably and immutably at once —
+field-disjointness does not save you when the fields live behind a guard. Both fixed (declare `full`
+uninitialised; read the sequence number once into a local).
+
+`cortex-desktop` was never a Rust problem: `tauri-build` rejected `bundle.windows.nsis.installModes`
+as an unknown field — the config was written against a newer Tauri schema than the pinned crate.
+`installModes: ["perUser"]` is that crate's default anyway, so the field is dropped rather than
+renamed into a shape I cannot verify, and `cargo update` in `cortex-desktop/src-tauri` is the way to
+get the option back if a per-machine installer is ever wanted.

@@ -60,7 +60,9 @@ impl SessionBuffer {
         provenance: &str,
     ) -> bool {
         let mut inner = self.inner.lock().await;
-        let mut full = false;
+        // Declared uninitialised on purpose: the block below always assigns it, and
+        // `let mut full = false;` tripped the crate's unused-assignments error (E0561 class).
+        let full;
         {
         let entry = inner
             .sessions
@@ -80,8 +82,12 @@ impl SessionBuffer {
 
         // `entry` is out of scope here: the &mut borrow of inner.sessions has to end before the
         // order/counter bookkeeping below, or the borrow checker sees two live mutable borrows.
-        inner.inserted += 1;
-        inner.order.insert(session_id.to_string(), inner.inserted);
+        // One read of the guard, then the two writes. `inner.order.insert(_, inner.inserted)` on
+        // its own borrows the MutexGuard mutably and immutably at once (E0502): `inner` is a guard,
+        // not a struct, so the fields are not disjoint as far as the borrow checker is concerned.
+        let seq = inner.inserted + 1;
+        inner.inserted = seq;
+        inner.order.insert(session_id.to_string(), seq);
         if inner.sessions.len() > self.max_sessions {
             // Evict least-recently-touched to keep memory bounded under abuse.
             let oldest = inner
