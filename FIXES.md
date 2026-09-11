@@ -334,5 +334,21 @@ percent-encoded or GitHub reads them as workflow-command syntax. The script is n
 against synthetic logs in both formats (`bash .github/scripts/report-cargo.sh /tmp/{fmt,clippy,
 test,check,build}.log`), and it emits 5 escaped single-line annotations.
 
+Two more bugs were caught by *testing the reporting locally* rather than pushing it blind, which is
+the only reason to write a reporter at all:
+
+1. The step ran `.github/scripts/report-cargo.sh` as a relative path, but the core job sets
+   `working-directory: cortex-core`, so the file was not there and the step exited **127** — which
+   showed up in CI as another failure on top of the real one. All runner-side script calls now use
+   `$GITHUB_WORKSPACE/...`, and every reporter step is `continue-on-error: true`.
+2. `publish-diagnostics.sh` built a proper JSON check-run payload with `jq` and then piped the raw
+   log text to `gh api --input=-` instead — a first stub that accepted anything hid it, so the stub
+   now validates the JSON (`.name and .head_sha and .output.summary and .conclusion=="neutral"`) and
+   fails the way `gh` would. The channel itself is chosen because `api.github.com` is reachable here
+   while the log endpoints are not: a check run on the commit carries ~64 KB of rustc output in
+   `output.summary`, with a PR comment and single-line annotations as fallbacks, and the step always
+   prints which channels landed (`check-run=ok comment=skip`, or the 403 text when the workflow token
+   is pinned to read-only).
+
 Still `continue-on-error`: fmt and clippy, so style drift cannot fail the build. Flip both once
 the first clean pass lands.
