@@ -16,7 +16,11 @@
 # newline, and `%` / `::` must be percent-encoded or they read as command syntax.
 #
 # Usage: report-cargo.sh [logfile...]     (defaults to /tmp/{fmt,clippy,test,check}.log)
-set -uo pipefail
+# Deliberately not `set -e`/pipefail: the runner's default shell has -e, and a `grep` that
+# matches nothing (or dies of SIGPIPE when head closes the pipe) would abort the script and
+# silently destroy the diagnostics this whole file exists to deliver. A reporter must not
+# become the outage.
+set +e +u -o pipefail
 
 files=("$@")
 if [ "${#files[@]}" -eq 0 ]; then
@@ -35,13 +39,16 @@ emit() { # $1 title, $2 level, $3 body
   [ -n "$body" ] || return 0
   # Cap below the annotation size limit so a giant log can never fail the run by itself.
   printf '::%s title=%s::%s\n' "$level" "$title" "${body:0:3000}"
+  found=1
 }
 
 DIAG='(error|warning)(\[E[0-9]+\])?:'
 
+found=0
 for f in "${files[@]}"; do
-  [ -f "$f" ] || continue
-  [ -s "$f" ] || continue
+  if [ ! -f "$f" ]; then echo "::warning title=no log ($f)::the build step that writes it did not run, or tee did not reach /tmp"; continue; fi
+  if [ ! -s "$f" ]; then echo "::notice title=empty log ($f)::the step produced no output (it probably passed)"; continue; fi
+  found=1
 
   case "$f" in
     *fmt*)
@@ -69,3 +76,10 @@ for f in "${files[@]}"; do
       ;;
   esac
 done
+
+# If the logs existed but nothing matched, say so loudly. Silence here would look like
+# "CI produced no diagnostics", which is worse than a noisy wrong guess.
+if [ "$found" = "0" ]; then
+  echo "::error title=reporter found nothing::logs present but no diagnostic lines matched; raw head follows: $(for f in "${files[@]}"; do [ -s "$f" ] && strip_ansi <"$f" | head -c 400; done | flatten)"
+fi
+exit 0

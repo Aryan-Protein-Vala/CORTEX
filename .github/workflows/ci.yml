@@ -75,10 +75,36 @@ jobs:
           cargo test --all-targets --message-format short 2>&1 | tee /tmp/test.log
 
       - name: Report cargo diagnostics
-        # The Actions log files are unreachable from the environment this branch is developed in,
-        # so the failures have to surface as check-run annotations (see the script header).
+        # Actions log *files* are unreachable from the environment this branch is developed in
+        # (results-receiver + Azure blob both die with a TLS EOF), so the diagnostics have to come
+        # back through something that is readable: check-run annotations, and — when the job token
+        # is allowed to write them — a PR comment with the raw tail of the log. continue-on-error,
+        # because a broken reporter must never replace the failure it exists to explain.
         if: always()
-        run: chmod +x .github/scripts/report-cargo.sh && .github/scripts/report-cargo.sh
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          bash .github/scripts/report-cargo.sh /tmp/fmt.log /tmp/clippy.log /tmp/test.log /tmp/build.log
+          {
+            echo "### cortex-core cargo output, run ${GITHUB_RUN_ID}, attempt ${GITHUB_RUN_ATTEMPT}"
+            echo
+            for f in /tmp/test.log /tmp/clippy.log /tmp/fmt.log /tmp/build.log; do
+              [ -s "$f" ] || continue
+              echo "<details><summary>$f — $(wc -l <"$f") lines</summary>"
+              echo
+              echo '```text'
+              tail -c 14000 "$f" | sed -e 's/\x1b\[[0-9;]*m//g'
+              echo '```'
+              echo
+              echo "</details>"
+            done
+          } > /tmp/core-report.md
+          if [ -n "${PR_NUMBER:-}" ] && [ "$PR_NUMBER" != "" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/core-report.md \
+              || echo "::warning title=PR comment blocked::GITHUB_TOKEN cannot write issue comments; enable pull-requests: write for workflows, or the annotations above are all you get"
+          fi
 
       - name: Build (release, single binary)
         # This is the artifact the installers ship, so its output is captured like the rest:
@@ -326,5 +352,6 @@ jobs:
 
       - name: Report cargo diagnostics
         if: always()
-        run: chmod +x .github/scripts/report-cargo.sh && .github/scripts/report-cargo.sh /tmp/check.log
+        continue-on-error: true
+        run: bash .github/scripts/report-cargo.sh /tmp/check.log
           cargo check --all-targets 2>&1 | grep -q "^error" && exit 1 || true
