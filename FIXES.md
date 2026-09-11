@@ -270,7 +270,7 @@ annotations plus local reasoning about the exit codes.
 What the run *did* prove, on GitHub's own hardware: `cortex-mcp` stdio smoke on
 ubuntu-20 / ubuntu-22 / macos-20 / macos-22, `cortex-extension` manifest audit + harvest logic,
 `setup-cursor-mcp.sh` merge safety on ubuntu + macos, `cortex-py` on 3.9 and 3.12, and repo
-hygiene (14 manifests agreeing on `0.1.0`). Those eight jobs are the first machine-verified
+hygiene (14 manifests agreeing on `0.1.0`). Those ten jobs are the first machine-verified
 evidence this project has had.
 
 Fixes applied, each re-checked locally:
@@ -305,3 +305,34 @@ Things this run still does not tell us, stated plainly:
   supported LTS proved the scripts are not portable. Anything in this ledger that says "verified"
   for a Rust crate still means *unverified*, and anything that says verified for Node now means
   "verified on Node 22".
+
+## Fifth pass: run #2, and the fact that a failing CI I cannot read is barely better than none
+
+`c50a484` → **12 of 14 jobs pass** (`gh run view 34585419607`). The Node 22 bump fixed both JS
+jobs, the desktop validator now passes, and `cargo generate-lockfile` got through the `tower 0.4`
+pin — so the core job reached real compilation and died at **`cargo test` (exit 101)**: the 61
+Rust tests have never been compiled, and now something in them does not typecheck. `cortex-desktop`
+died at `cargo check` for the same reason.
+
+Being told "exit 101" is not feedback. The log endpoints that carry the actual rustc output are
+unreachable from this environment, so the workflow now carries the diagnostics to the API instead:
+
+- `Format`, `Clippy`, `Test`, `Build (release)`, and the desktop `cargo check` each `tee` to
+  `/tmp/{fmt,clippy,test,build,check}.log` (with `set -o pipefail`, so `| tee` cannot swallow the
+  exit code — a `cmd | tee` chain without it turns a failing compile into a green step, which is
+  the same false-green class as the Node flag bug).
+- `--message-format short` is passed to clippy/test/build so one diagnostic fits one line.
+- `.github/scripts/report-cargo.sh` runs under `if: always()` and emits each log as a check-run
+  annotation (`::error title=cargo test::…`), which I can read with
+  `gh api /repos/…/check-runs/<id>/annotations`.
+
+Two real bugs were caught while testing that script, both worth recording because they are the
+reason this pattern is dangerous: (1) the first draft greped `^error`, which matches rustc's human
+format but misses *every* diagnostic in `short` format (`src/file.rs:12:5: error: …`) — a reporter
+that quietly reports nothing; (2) an annotation payload must be one line and needs `%`/`::`
+percent-encoded or GitHub reads them as workflow-command syntax. The script is now exercised
+against synthetic logs in both formats (`bash .github/scripts/report-cargo.sh /tmp/{fmt,clippy,
+test,check,build}.log`), and it emits 5 escaped single-line annotations.
+
+Still `continue-on-error`: fmt and clippy, so style drift cannot fail the build. Flip both once
+the first clean pass lands.

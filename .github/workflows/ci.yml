@@ -52,19 +52,41 @@ jobs:
       - name: Resolve dependencies
         run: cargo generate-lockfile
 
+      # cargo fmt has never run in the authoring environment, so the first pass is expected to
+      # show diffs. It stays non-fatal until one run is clean, but the diff is still reported:
+      # `cargo fmt --check` prints exactly what to apply, so the formatting can be fixed by hand
+      # without a toolchain. Flip continue-on-error to false once it passes here.
       - name: Format
-        continue-on-error: true # formatting was never run locally (no cargo at
-        run: cargo fmt --all --check # authoring time); flip once it is green
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo fmt --all --check 2>&1 | tee /tmp/fmt.log
 
       - name: Clippy
-        continue-on-error: true # same: warnings are expected on the first run
-        run: cargo clippy --all-targets -- -D warnings
+        # `short` keeps one line per diagnostic, which survives the trip into an annotation.
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo clippy --all-targets --message-format short -- -D warnings 2>&1 | tee /tmp/clippy.log
 
       - name: Test
-        run: cargo test --all-targets
+        run: |
+          set -o pipefail
+          cargo test --all-targets --message-format short 2>&1 | tee /tmp/test.log
+
+      - name: Report cargo diagnostics
+        # The Actions log files are unreachable from the environment this branch is developed in,
+        # so the failures have to surface as check-run annotations (see the script header).
+        if: always()
+        run: chmod +x .github/scripts/report-cargo.sh && .github/scripts/report-cargo.sh
 
       - name: Build (release, single binary)
-        run: cargo build --release --bin cortex-core
+        # This is the artifact the installers ship, so its output is captured like the rest:
+        # a release-only failure (linker flags, a cfg that only bites in --release) has to be
+        # readable without downloading the Actions log.
+        run: |
+          set -o pipefail
+          cargo build --release --bin cortex-core --message-format short 2>&1 | tee /tmp/build.log
 
       # End-to-end against the *release binary*: no test doubles, no source
       # imports. If this passes, a stranger's `cargo run` works.
@@ -130,10 +152,14 @@ jobs:
           kill $pid; wait $pid 2>/dev/null || true
 
       - name: Core log on failure
+        # A smoke-test failure is a runtime bug, not a compile error, so it needs its own
+        # annotation: the runner's stdout is where the binary said why it refused to start.
         if: failure()
         run: |
-          echo "--- /tmp/core.log"; tail -60 /tmp/core.log || true
-          echo "--- /tmp/core-auth.log"; tail -40 /tmp/core-auth.log || true
+          set -uo pipefail
+          { echo "--- /tmp/core.log"; tail -60 /tmp/core.log 2>/dev/null
+            echo "--- /tmp/core-auth.log"; tail -40 /tmp/core-auth.log 2>/dev/null; } | tee /tmp/core-run.log
+          .github/scripts/report-cargo.sh /tmp/build.log /tmp/core-run.log
 
   # ── The MCP server users actually install ──────────────────────────────────
   mcp:
@@ -295,5 +321,10 @@ jobs:
       - name: cargo check
         working-directory: cortex-desktop/src-tauri
         run: |
-          cargo check --all-targets
+          set -o pipefail
+          cargo check --all-targets --message-format short 2>&1 | tee /tmp/check.log
+
+      - name: Report cargo diagnostics
+        if: always()
+        run: chmod +x .github/scripts/report-cargo.sh && .github/scripts/report-cargo.sh /tmp/check.log
           cargo check --all-targets 2>&1 | grep -q "^error" && exit 1 || true

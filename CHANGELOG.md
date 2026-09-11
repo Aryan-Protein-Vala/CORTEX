@@ -36,6 +36,10 @@ launch that oversells dies in the first HN comment.
   recall, lock, forget, config), HTTP/transport failures mapped to the core's own error codes,
   `cortex:changed` / `cortex:deep-link` events, real CSP and window config, generated app icons,
   hand-written UI (`src/index.html`, `main.js`, `styles.css`) that only talks to Rust via `invoke`.
+- CI now reports Rust diagnostics as check-run annotations via `.github/scripts/report-cargo.sh`,
+  because the Actions log endpoints are unreachable from the development environment: `cargo
+  fmt/clippy/test/build` and the desktop `cargo check` tee their output, and a reporter turns it
+  into escaped single-line annotations. Tested against synthetic logs in both rustc formats.
 - First real CI run (run 34584343041): fixed a dependency pin that never existed
   (`tower = "0.7"`, now `0.4`), added the missing `security.csp` to the Tauri config, moved the
   `sdk-js`/`frontend` CI jobs to Node 22 because `--experimental-strip-types` is not a Node 20
