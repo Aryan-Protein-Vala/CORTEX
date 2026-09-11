@@ -80,6 +80,18 @@ jobs:
         run: |
           set -o pipefail
           cargo test --all-targets --message-format short 2>&1 | tee /tmp/test.log
+          status=${PIPESTATUS[0]}
+          # Echo the failing test names from the step that still owns the log, so a red run is
+          # readable even if the cross-step reporter never fires (it depends on /tmp surviving
+          # between steps, on `if: always()`, and on a script that must never become the outage).
+          if [ "$status" -ne 0 ]; then
+            sed -e 's/\x1b\[[0-9;]*m//g' /tmp/test.log \
+              | grep -E "test result:|panicked at|FAILED|^failures:|^    [a-z_:]+$" \
+              | head -25 \
+              | sed -e 's/%/%25/g' -e 's/::/%3A%3A/g' \
+              | while IFS= read -r line; do echo "::error title=failing test::${line:0:400}"; done
+          fi
+          exit "$status"
 
       - name: Report cargo diagnostics
         # Actions log *files* are served from hosts this environment cannot reach (results-receiver
