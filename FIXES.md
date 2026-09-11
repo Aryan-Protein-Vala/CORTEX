@@ -352,3 +352,46 @@ the only reason to write a reporter at all:
 
 Still `continue-on-error`: fmt and clippy, so style drift cannot fail the build. Flip both once
 the first clean pass lands.
+
+## Sixth pass: the CI loop works, and it is the only thing that has ever verified this crate
+
+The diagnostics channel is now proven end to end: `publish-diagnostics.sh` posted a check run
+(`diagnostics: cortex-core`, 41 KB of rustc output in `output.summary`) and
+`gh api /repos/…/commits/<merge-sha>/check-runs` read it back. Two details that cost runs to learn:
+
+- The check run is created on `GITHUB_SHA`, which for a `pull_request` event is **the PR merge
+  commit**, not the branch head. Querying `commits/<head>/check-runs` shows nothing and looks like a
+  broken reporter; query the merge sha (`gh api /repos/…/pulls/1 --jq .merge_commit_sha`).
+- The job-level `permissions: {checks: write, pull-requests: write}` request **was honoured** —
+  `check-run=ok`, so this repo does not pin workflow tokens to read-only. No settings change needed.
+
+`cortex-core` reached compilation and reported 10 distinct defects; every fix in `a7d92f3` is a
+direct response to a quoted error, not a hypothesis:
+
+| rustc | site | fix |
+| --- | --- | --- |
+| E0277 (Debug, Clone) | `engine/decay.rs` | `#[derive(Debug, Clone)] pub struct DecayEngine` — `CoreConfig` owns it by value and derives both. |
+| E0277 | `storage/store.rs:102` | `tokio::fs::rename(&tmp, &*self.path)` — `Arc<PathBuf>` does not implement `AsRef<Path>`; `PathBuf` does. |
+| E0603 | `ai/mod.rs:59` | `heuristic_triplets` made `pub` (it is the documented fallback extractor, called from the API layer). |
+| E0728 | `api/server.rs:1004` | `.or_else(|| store.get_node(&id).await…)` → a `match` in the async body; a sync closure cannot await. |
+| E0308 | `api/server.rs:1063` | `state.apply_overwrite(…).await` — the method is `async fn`. |
+| E0308 | `types/mod.rs` test | `predicate: "Likes Apples ".into()` — a `String` field fed a `&str`. |
+| E0382 | `api/server.rs:884` | the response body read `owner` after `async move` took it; the task now gets `owner_for_task = owner.clone()`. |
+| E0382 | `types/mod.rs:517` | `ProceduralRule::new` converted its `impl Into<String>` args twice; convert once, reuse. |
+| E0499/E0502 (×7) | `storage/session.rs:77-88` | the `entry` borrow of `inner.sessions` now ends in a scoped block before `inner.order`/`inner.inserted` are touched; `full` is captured inside and returned. |
+| E0609 | `storage/vector_db.rs:279` | Qdrant's `UpdateResult` has no `deleted` field. `delete_for_nodes` now returns the number of point ids **submitted**, and the doc comment says so rather than inventing a per-point tally. |
+| unused imports / needless `mut` | `engine/recall.rs:14,267` | dropped `DEFAULT_OWNER`, `strip_id_prefix`; `let push = …` (it takes `&mut` parameters, so it never needed a mutable binding). |
+
+After editing, brace/paren balance was re-checked per file **against HEAD**, because my naive
+masker reports `-1` for `server.rs` at HEAD too (raw JSON string literals) — comparing to HEAD is
+what makes the check meaningful instead of alarming.
+
+Not yet known: whether those 10 fixes make `cargo test` pass. The commit is local; the sandbox's
+GitHub token expired mid-loop (`The github.com token in GH_TOKEN is no longer valid`), so the next
+verdict needs a reconnect. That is the honest boundary: **61 Rust tests still have never executed**,
+but for the first time they are being compiled and reported on by something other than me.
+
+Deferred, deliberately: `cargo fmt` produced 81 KB of diffs (`/tmp/fmt.log`, also in that check run).
+`Format` and `Clippy` stay `continue-on-error` while compile errors exist — cosmetic churn and real
+bugs must not be fixed in the same commit. Once the crate compiles and tests pass, the fmt patch can
+be applied in one pass and both gates flipped to fatal.

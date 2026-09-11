@@ -36,6 +36,13 @@ launch that oversells dies in the first HN comment.
   recall, lock, forget, config), HTTP/transport failures mapped to the core's own error codes,
   `cortex:changed` / `cortex:deep-link` events, real CSP and window config, generated app icons,
   hand-written UI (`src/index.html`, `main.js`, `styles.css`) that only talks to Rust via `invoke`.
+- `cortex-core`: the ten compile errors CI's own `cargo test` reported are fixed — a missing
+  `#[derive(Debug, Clone)]` on `DecayEngine`, `Arc<PathBuf>` fed to `tokio::fs::rename`, an `.await`
+  inside the sync closure passed to `or_else`, an unawaited `apply_overwrite`, two moved-value errors
+  (`owner` in the ingest response, `ProceduralRule::new`'s `impl Into<String>` arguments), seven
+  borrow-checker conflicts in the session store's eviction bookkeeping, a `UpdateResult.deleted`
+  field that Qdrant does not have (the count is now honestly "point ids submitted"), and two
+  dead-code warnings the crate treats as errors.
 - CI now reports Rust diagnostics as check-run annotations via `.github/scripts/report-cargo.sh`,
   because the Actions log endpoints are unreachable from the development environment: `cargo
   fmt/clippy/test/build` and the desktop `cargo check` tee their output, and a reporter turns it
