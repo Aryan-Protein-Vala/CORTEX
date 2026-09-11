@@ -302,7 +302,7 @@ impl MemoryNode {
     /// Applies an extracted fact's salience to this node.
     pub fn reinforce_with_impact(&mut self, impact: u8, confidence: f32) {
         self.impact = self.impact.max(impact.clamp(1, 10));
-        let boost = 1.0 + confidence.clamp(0.0, 1.0) as f32;
+        let boost = 1.0 + confidence.clamp(0.0, 1.0);
         self.stability = (self.stability + boost).clamp(1.0, 100.0);
         self.mark_accessed();
     }
@@ -342,7 +342,7 @@ impl MemoryNode {
         let lock_bonus = if self.locked { 4.0 } else { 1.0 };
         let mesh_bonus = if is_global_mesh(&self.owner_uri) { 1.25 } else { 1.0 };
         (self.retention_probability().max(0.01)
-            * (self.stability.max(1.0) * f32::from(self.impact.max(1) as f32)).ln_1p()
+            * (self.stability.max(1.0) * f32::from(self.impact.max(1))).ln_1p()
             * lock_bonus
             * mesh_bonus)
             + (self.access_count as f32).ln_1p()

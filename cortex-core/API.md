@@ -73,6 +73,10 @@ something was dropped instead of quietly shrinking your context. `briefing` is t
 ### `POST /v1/ingest` — the write path
 Request: `{ "owner"?, "user_id"?, "session_id"?, "prompt"?, "messages"?: [{role, content, timestamp}], "source"?, "wait"?: boolean, "impact"?: number }`
 
+`session_id` is accepted (so one client object works against both `/v1/ingest` and `/v1/session/message`) and
+**not** used by ingest: a transcript that was extracted on the way in must not be extracted a second time
+when the session flushes. Buffer turns with `POST /v1/session/message`; flush with `POST /v1/flush`.
+
 - `prompt` **or** `messages` is required: neither → `400 {"error":{"code":"bad_request",…}}`, and a
   body that will not deserialize into `IngestRequest` → `422` from the extractor. `source` is stored
   as provenance (`mcp` | `extension` | `sdk` | `hydrator`).
@@ -103,7 +107,7 @@ Request: `{ "owner"?, "user_id"?, "session_id"?, "prompt"?, "messages"?: [{role,
   most recently **updated** first (`updated_at` descending — not retention, so a pinned old fact does not
   float to the top). `q` matches labels and aliases; `edges` are the subgraph those nodes induce, so the
   dashboard can draw them without a second request.
-- `POST /v1/memories/{node_id}/lock` — `{ "locked": true, "label"?: "SurrealDB" }`. `locked: false` releases it. Locked nodes are exempt from fade and prune.
+- `POST /v1/memories/{node_id}/lock` — `{ "locked": true }`. `locked: false` releases it. Locked nodes are exempt from fade and prune. A `label` key is tolerated and ignored: ids are content-addressed from the label, so renaming through this endpoint would create a second node - rename by `forget` + `remember`.
 - `DELETE /v1/memories/{node_id}` → `204`, or `404 {"error":{"code":"not_found"}}`. Also removes the node's vector-index entries and cascades its edges.
 - `GET /v1/resolve?uri=cortex://…&include_mesh=false&token_budget=400` → the packet for one URI.
 - `POST /v1/sweep` → `SweepReport`:

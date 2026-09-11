@@ -740,7 +740,12 @@ struct IngestRequest {
     user_id: Option<String>,
     #[serde(default)]
     owner: Option<String>,
+    /// Accepted for client compatibility so an SDK can send one object to either endpoint
+    /// (`/v1/ingest` and `/v1/session/message` share a shape). Ingest deliberately does NOT
+    /// buffer into the session: a byte that is already extracted must not be extracted twice on
+    /// the next `/v1/flush`. Read nowhere, hence the allow - if you wire it up, delete the allow.
     #[serde(default)]
+    #[allow(dead_code)]
     session_id: Option<String>,
     #[serde(default)]
     prompt: Option<String>,
@@ -1363,7 +1368,12 @@ async fn delete_memory(
 struct LockRequest {
     #[serde(default = "default_true")]
     locked: bool,
+    /// Ignored on purpose. Node ids are content-addressed from the label (`node_id_for_label`), so
+    /// "rename" here would insert a second node and leave the first locked-but-orphaned. Renaming a
+    /// memory is `forget` then `remember`; this field is only tolerated so a client that sends it
+    /// does not get a 400 for a lock it clearly asked for.
     #[serde(default)]
+    #[allow(dead_code)]
     label: Option<String>,
 }
 

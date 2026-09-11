@@ -61,7 +61,12 @@ for f in "${files[@]}"; do
       emit "clippy ($hits diagnostics)" error "$(strip_ansi <"$f" | grep -E "$DIAG" -A 4 | head -c 4000 | flatten)"
       ;;
     *test*)
-      emit "cargo test" error "$(strip_ansi <"$f" | grep -E "$DIAG|test result:|failures:" -A 6 | head -c 4000 | flatten)"
+      # A green compile plus red assertions has no `error:` lines at all, so matching only rustc
+      # diagnostics reported "no diagnostic lines found" for a run whose tests actually failed -
+      # the worst possible outcome for a reporter, because it looks like there was nothing to say.
+      # Panics, the summary line and the indented failure list are what to look for here.
+      TESTDIAG="$DIAG|test result:|panicked at|assertion .* failed|failures:|^    [a-z_]+$"
+      emit "cargo test" error "$(strip_ansi <"$f" | grep -E "$TESTDIAG" -A 12 | head -c 6000 | flatten)"
       ;;
     *build*)
       emit "cargo build --release" error "$(strip_ansi <"$f" | grep -E "$DIAG" -A 6 | head -c 4000 | flatten)"

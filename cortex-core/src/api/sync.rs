@@ -21,6 +21,9 @@ use anyhow::{bail, Result};
 #[derive(Debug, Clone)]
 pub struct CloudSyncNode {
     cloud_url: String,
+    /// Kept so the handle round-trips when sync lands; every sync entry point currently returns
+    /// 501 `not_wired`, so nothing reads it yet.
+    #[allow(dead_code)]
     user_id: String,
     /// Sync is only attempted when this is true; see `disabled()`.
     enabled: bool,

@@ -420,3 +420,14 @@ get the option back if a per-machine installer is ever wanted.
 
 **`.github/workflows/ci.yml` — my own insertion produced invalid YAML.** I spliced a step in with a string slice and lost the indentation; caught by parsing the file with a YAML parser locally rather than pushing it blind. Lesson recorded where it belongs: any edit to a workflow ends with a parse, not a look.
 
+---
+
+## Seventh pass: core compiles; two doc lies and a mute reporter
+
+Round `34597264095` (head `9d22c54`) is **13/14 green**: `cortex-desktop` passed `cargo check` end to end, and `cortex-core` now compiles too — its remaining failure is clippy's `-D warnings` plus test assertions. The 5 lints were 3 "field never read" and 2 useless casts; two of the three fields were not style problems but **documentation over-promises**:
+
+- `IngestRequest.session_id` — `API.md` listed it in the ingest request body, which reads as "ingest buffers into that session". It does not, and must not: a transcript extracted on the way in would be extracted a second time at `/v1/flush`. The field is now documented as accepted-for-shape-compatibility and unused, with the reason in the struct.
+- `LockRequest.label` — `API.md` showed `{"locked": true, "label": "SurrealDB"}`, implying rename. Ids are content-addressed from the label (`node_id_for_label`), so honouring it would insert a second node and leave the first locked-but-orphaned. Docs now say the key is tolerated and ignored, and that renaming is `forget` + `remember`.
+- `CloudSyncNode.user_id` — sync returns 501 `not_wired`; the field is kept for the handle's round-trip and says so.
+
+`.github/scripts/report-cargo.sh` reported "no diagnostic lines found" on a run whose tests genuinely failed: it matched only rustc's `error|warning:` shape, and a green compile with red assertions has no such lines. A reporter that is silent on a real failure is worse than no reporter, because it reads as "nothing to report". The test branch now matches panics, assertion lines and the indented failure list; verified against a synthetic log (it reproduces the test name, `recall.rs:220:9`, and `left: 600 / right: 500`).
