@@ -427,8 +427,6 @@ pub fn build_router(state: AppState) -> Router {
         cors = cors.allow_origin(tower_http::cors::AllowOrigin::list(allowed));
     }
 
-    let backend = state.store.backend_name();
-
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/v1/recall", post(recall_context))
