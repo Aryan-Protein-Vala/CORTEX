@@ -1,0 +1,90 @@
+name: Bug report
+description: Something did not remember, recall or install the way the docs say it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        CORTEX is a solo project with no support team, so the more exact this is, the faster
+        it gets fixed. Paste raw output rather than describing it.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface broke?
+      options:
+        - cortex-core (Rust engine / HTTP API)
+        - cortex-mcp (editor integration)
+        - cortex-extension (Chrome)
+        - cortex-desktop (Tauri)
+        - cortex-frontend (dashboard / site)
+        - cortex-js / cortex-py (SDKs)
+        - installer / setup scripts
+        - docs only
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The behaviour you saw, and the memory or tool call involved.
+      placeholder: |
+        cortex_remember stored the fact, /v1/memories shows the node, but cortex_recall returns an
+        empty briefing for the same owner.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Exact commands, in order. Include the owner string — most "it forgot" reports are an owner mismatch.
+      render: shell
+      placeholder: |
+        # terminal 1
+        cd cortex-core && cargo run --release --bin cortex-core
+        # terminal 2
+        curl -s localhost:3030/v1/ingest -H 'content-type: application/json' \
+          -d '{"owner":"me@local","prompt":"USER: I use pnpm in CI","wait":true}'
+        curl -s localhost:3030/v1/recall -H 'content-type: application/json' \
+          -d '{"owner":"me@local","prompt":"package manager","token_budget":600}'
+    validations:
+      required: true
+  - type: textarea
+    id: health
+    attributes:
+      label: Output of GET /health
+      description: This is the fastest way to see which backend and which mode you are actually running.
+      render: json
+      placeholder: '{"status":"ok","backend":"file","services":{"graph":true,"extraction":false,...}}'
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: From /health ("version"), plus the commit you built from if you patched anything.
+      placeholder: "0.1.0 / c88d94b"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Core startup banner and any error lines; for the extension, the DevTools console of the service worker.
+      render: shell
+  - type: checkboxes
+    id: honest
+    attributes:
+      label: Before posting
+      options:
+        - label: I checked the "What is not built" list in README.md and this is not one of those items.
+          required: true
+        - label: I am not using a package from the registry named "cortex-mcp" or "cortex-sdk" (those are other people's projects).
+          required: true
+        - label: I ran `node scripts/verify-all.mjs` in a clone and noted which suites skipped or failed.
+          required: false

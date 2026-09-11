@@ -1,0 +1,15 @@
+# One Rust toolchain for every crate in this repo (cortex-core, cortex-desktop).
+#
+# Pinned because "works on my machine" is worthless for a single-binary engine
+# that other people install from a clone: rustfmt and clippy live in the
+# components list so `cargo fmt --check` and `cargo clippy` work in CI and in a
+# fresh dev container without a setup script, and the channel is `stable` rather
+# than a date so nobody is forced to reproduce a nightly-only build.
+#
+# Change this file and nothing else: cargo reads it from the working directory
+# upward, so both crates move together. CI (`.github/workflows/ci.yml`) relies on
+# the same file.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

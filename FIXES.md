@@ -1,0 +1,433 @@
+# FIXES.md — what this cycle changed, and what was *not* verified
+
+Companion to [`LAUNCH_AUDIT.md`](LAUNCH_AUDIT.md). The audit listed the problems;
+this file is the ledger of fixes, the evidence for each, and — importantly — the
+things that are **written but unverified**. Read the last section before trusting
+any claim about the Rust core or the desktop app.
+
+Branch: `arena/01a08ac5-cortex`. Everything landed as working-branch commits; no
+PR, no merge to `main`.
+
+## Verification status per surface
+
+| Surface | Suite | Result | What it proves |
+| --- | --- | --- | --- |
+| `cortex-mcp` | `npm test` (`node --check` + `scripts/smoke.mjs`) | **28/28** | a real stdio JSON-RPC session: initialize, tool list (9 tools), recall returns stored facts without leaking raw ids, budget clamping + `truncated`, `isError` on core failure, label→id ambiguity refusal, secret scrubbing, path-allowlist on file ingest |
+| `cortex-extension` | `npm test` (manifest audit + syntax + `scripts/test-harvest.mjs`) | **12/12** | consent gating, per-tab/per-site buffers, block stripping, in-batch dedupe, turn hashing, adapter degradation, Gemini flagged experimental; `check-manifest.mjs` validates permissions, icon set, description length, and that every `chrome.*` API used is permitted |
+| `cortex-js` | `npm test` + `npx tsc --noEmit` + `npm run build` | **9/9**, clean, ESM+CJS+`.d.ts` verified importable | typed `CortexError` carrying the core's `code` + fix hint, `impact` on the wire, timeout + abort behaviour, `x-cortex-key` header |
+| `cortex-py` | `python3 -m unittest discover -s tests -t .` | **10/10** | same contract as the JS SDK with stdlib `urllib` only; header casing verified against a stub server |
+| `cortex-frontend` | `npm run verify` | green | `tsc --noEmit` with type checking **on**, 8 hydrate tests, `next build` (17 routes) |
+| `scripts/test-setup-merge.mjs` | node, no deps | **8/8** | installer merges instead of overwriting, backs up, refuses unparseable JSON, tolerates an empty file, idempotent, `--remove` keeps other servers, `--dry-run` writes nothing, fails loudly on a missing entry point |
+| `cortex-core` | `cargo test` | **cannot run here** | 61 tests written — 44 unit tests across 9 modules plus 17 integration (10 HTTP contract driving `build_router`, 7 engine invariants) — but there is no `cargo` in this environment and rustup is unreachable. CI is the first real build |
+| `cortex-desktop` | `cargo check` / `tauri build` | **cannot run here** | Rust commands + config + icons generated and visually checked; never compiled. CI runs `cargo check` |
+
+Re-run everything with the commands in `AGENTS.md`.
+
+## The audit's ten headline findings
+
+1. **Id / owner / recall correctness.** One derivation path (`types::{node_id_for_label,
+   canonical_node_id, edge_id_for}`), owner-scoped reads *and* writes, `/v1/memories`
+   filtered by owner, re-ingest idempotency, cascade delete on forget, vector point ids
+   tagged with the embedding model so a model swap cannot mix namespaces.
+   Covered by `tests/api_contract.rs` + `tests/engine_tests.rs` (uncompiled) and by MCP
+   assertions "recall returns the stored fact" / "never leaks raw ids" (verified).
+
+2. **Token budget was marketing, not code.** `recall::render_briefing` now packs against
+   the budget and decides `truncated`; `CORTEX_TOKEN_BUDGET` / `CORTEX_MAX_TOKEN_BUDGET`
+   are enforced server-side; the MCP clamps what a client can ask for and reports
+   truncation instead of silently dropping; docs state the ceiling and what happens when
+   it bites.
+
+3. **Security.** `guard` accepts `Authorization: Bearer`, `x-cortex-key` or `?key=`;
+   `/health` open; non-loopback bind without a key panics at startup; CORS allowlist from
+   `CORTEX_ALLOWED_ORIGINS`; 2 MiB body cap; 30 s extraction timeout; per-IP rate map;
+   `wait` on ingest acquires the job permit *before* spawning; SIGTERM drains and flushes
+   buffered sessions. CI has a dedicated auth-gate job (401 without a key, 401 with a wrong
+   one, 200 with the right one).
+
+4. **Docs told people to install a stranger's package.** `npx -y cortex-mcp`,
+   `pip install cortex-sdk` and a non-existent `@cortex/cli` are gone from every README, the
+   landing page and the docs page, replaced by install-from-clone and the explicit registry
+   warning in `README.md`. The Python package is renamed `cortex-py` (name confirmed free);
+   `cortex-js` is `private: true` with `npm install file:../cortex-js`.
+
+5. **Pricing pages led to dead buttons / fake checkout.** CTAs route to real pages
+   (`/dashboard`, `/dashboard/docs`, `/contact`) and the paid tier says out loud that billing
+   is not wired, nothing is charged, and the hosted core is a pre-order, not a product.
+
+6. **The dashboard was theatre.** `typescript.ignoreBuildErrors` off; one-line fake KPIs,
+   invented recall transcripts and `DEMO_NEURONS` deleted; data comes from `/health`,
+   `/v1/stats`, `/v1/memories`, `/v1/recall`, `/v1/sweep`, `/v1/export` through a keyed
+   server-side proxy; six explicit UI states including "core unreachable" (503
+   `core_unreachable`) and "degraded"; demo content only behind `?demo=1`, labelled;
+   hydrator parent-chain bug fixed and covered by tests; the brain inspector can lock and
+   forget for real.
+
+7. **The desktop app was a template.** Real window + CSP + bundle metadata; `src-tauri/src/lib.rs`
+   implements 8 commands with error mapping to the core's codes; the key never enters the
+   webview; deep link shows and focuses the window; icons generated from the CORTEX glyph;
+   README states "unsigned, no auto-updater". Never compiled — CI runs `cargo check`.
+
+8. **The extension was a privacy grenade.** Consent card per origin before any capture;
+   read-only by default; badge + audit log + pause + manual flush; injection is a visible,
+   editable composer insert; request-mode rewriting is opt-in and string-parts-only (the
+   `parts[0] += string` bug that corrupted image turns is gone); fetch hook awaits the
+   briefing under a 1200 ms cap so a send can never hang; icons, description and permissions
+   validated by a script that immediately found two real violations.
+
+9. **Legal/doc dishonesty.** AGPL stated on the landing page, in every README and in the
+   new `Cargo.toml` metadata; the about page no longer threatens a lawsuit and instead
+   explains the network clause plus a dual-license offer; terms and privacy rewritten so no
+   sentence describes a hosted product that does not exist (the old policy literally listed
+   data collected by "Cortex Cloud"); invented metrics and "zero latency / O(1) / infinite
+   memory" claims replaced with what the code does; Vercel Analytics is now opt-in
+   (`NEXT_PUBLIC_SITE_ANALYTICS`) and disclosed either way.
+
+10. **Preserved on purpose** (the audit's "do not lose" list): graceful
+    `Option<Arc<_>>` degradation for optional backends, the hourly sweep, BFS hop clamping,
+    ingest caps, MCP protocol correctness, `prefers-reduced-motion`, the three.js brain view.
+
+## Also fixed this cycle
+
+- **`.cursor/mcp.json` was committed with a machine-specific absolute path** (`/Users/aryansharma/...`).
+  It is now gitignored, generated by the installer, with `.cursor/mcp.json.example` committed.
+  The path still exists in Git history; it is a local path, not a credential.
+- **`setup-cursor-mcp.sh` used `cat >` to overwrite editor configs** and never installed the
+  MCP server's dependencies. It now merges (verified by 8 tests), runs `npm install`, supports
+  `--dry-run` / `--remove` / Claude Desktop, and has a PowerShell twin
+  (`setup-cursor-mcp.ps1`) for Windows — see "not verified" below.
+- **Stale `Cargo.lock` in `cortex-core`** pinned `axum 0.6.20` while the manifest required
+  `axum = "0.7"` — silent until someone builds `--locked`, then a hard failure. Deleted; CI
+  regenerates deliberately.
+- **`src/main.rs` re-declared the whole module tree** (`pub mod types; …`) alongside `lib.rs`,
+  so the binary compiled a second copy of the engine and `tests/` exercised a different tree
+  than users ran. The binary is now a thin layer over the library and `[[bin]]` is explicit.
+- **Dead Redis path removed:** `storage/working_memory.rs` was declared in `storage/mod.rs` and
+  used nowhere; the `redis` dependency and the Dragonfly service in `docker-compose.yml` went
+  with it. `docker-compose.yml` is now labelled optional at the top, with the env vars that
+  actually turn each backend on.
+- **`proto/sync.proto` looked wired and was not** (`tonic`/`prost` were dependencies, no
+  `build.rs` existed, so nothing compiled it). Deps removed, header added saying the file is a
+  design artifact and that publishing claims must not cite it.
+- **Root `README.md` was 37 lines of posture** ("docker compose up -d", "If you don't know how to
+  run Docker and Rust, close this tab") that contradicted the zero-infra default. Rewritten as
+  the actual operating manual: 60-second run, repo table, what-is-not-built, registry warning,
+  security paragraph, license, test commands.
+- **Root `.env.example` was a to-do list** ("collect these keys while I build the rest of the
+  stack") with Clerk keys for a product with no auth and a `cortex_god` password for a service
+  nobody starts. It now lists only variables the code reads, grouped per surface, and names the
+  ones that were removed and why.
+- **Extension `npm test` did not run the manifest check** even though its README said it did.
+  It now does — `check-manifest.mjs` is the first step.
+- **Landing pipeline claims contradicted the code** ("Map your concepts using SurrealDB",
+  "Smash it into Qdrant", "Delete the garbage", "Inject JSON-LD"). Rewritten to match: file
+  default with optional accelerators, decay as a score, a token-budgeted briefing. The export is
+  documented as portable JSON, not JSON-LD, because `GET /v1/export` emits no `@context`.
+
+## Written but not verified (read this before shipping)
+
+1. **The Rust core has never been compiled.** ~6k lines rewritten across `types`, `storage`,
+   `ai`, `engine`, `api`. What was done instead: a structurally-aware scan of all 22 files
+   (comments, strings, raw strings, char literals and lifetimes masked, then bracket matching
+   and open/close pairing verified) — clean. What CI adds: `cargo fmt --check`, `cargo clippy`,
+   `cargo test` (61 tests), a release build, an end-to-end smoke against the binary, and the
+   auth-gate test. Realistic first-run outcome: formatting diffs and a handful of borrow-checker
+   or type fixes. Budget 1–3 hours of CI-driven fixes.
+2. **The Tauri app has never been compiled either** (and its `Cargo.lock` was not regenerated
+   after the dependency edit). CI runs `cargo check`; a full signed bundle is deliberately not in
+   CI because there is no certificate to sign with.
+3. **`setup-cursor-mcp.ps1` has never run** — there is no PowerShell in this environment. The
+   merge semantics mirror the bash version and the JSON handling is deliberately conservative
+   (`ConvertFrom-Json`, BOM-less UTF-8, refuse-on-parse-error), but treat the first Windows run as
+   a test: check the backup file appears and the other servers survive.
+4. **CI has been authored, pushed, and never executed.** The branch is on GitHub
+   (`arena/01a08ac5-cortex`, head `9be437f`, 8 commits from this cycle), and
+   `.github/workflows/ci.yml` parses with 9 jobs mapped onto suites that all exist.
+   But GitHub only *registers* workflow files present on the default branch, so
+   `gh workflow run ci.yml --ref <branch>` returns 404, and the sandbox token gets
+   `403 Resource not accessible by integration` on `…/actions/permissions` — it can
+   push refs, not manage settings. To get the first run: open a PR from this branch
+   (the `pull_request` trigger reads the workflow from the PR head — no merge needed),
+   or land `ci.yml` on `main`. Until that run is green, items 1 and 2 above stay open
+   in the honest sense: the Rust core and the Tauri app are reviewed, not compiled,
+   and the workflow itself is unproven.
+
+5. **Registry publishing is documented, not done.** `cortex-mcp` and `cortex-sdk` belong to other
+   people; `cortex-js`, `cortex-py` and `cortex-core` names were checked as available but nothing
+   was published (publishing needs accounts, 2FA and a decision about the `@cortex` scope).
+6. **The extension has never been loaded into Chrome.** It has no `chrome.*` calls that the
+   manifest does not permit (scripted check) and its logic is tested, but rendering, the consent
+   card's behaviour on a real ChatGPT DOM and the composer insert need a 20-minute manual pass
+   before any listing.
+7. **The mesh is still 501 by design.** If you want `cortex://` federation for launch, that is a
+   week of work (transport + moderation + per-user opt-in), not a flag flip.
+
+## Second pass: docs, gates and the CI that was never run
+
+- **`CORTEX_DECAY_POLICY` was documented with the wrong value.** `DecayPolicy::parse` maps
+  `prune | delete | hard` to the `Prune` variant, and `as_str()` reports `prune` — so `/health` and
+  the startup banner say `prune` while the README, `.env.example`, both legal pages and the FAQ told
+  people to set `hard`. Every doc now uses `prune` and names the aliases. (AGENTS.md had been
+  "corrected" to `hard` earlier in this session; that correction was itself the bug.)
+- **Two CI steps asserted fabricated payloads.** `POST /v1/recall` takes `prompt`, not `query`;
+  `POST /v1/mesh/publish` requires `{nodes, edges}`, so the old body would have 422'd before the
+  handler could answer the honest 501. Both fixed, and the recall assertions now check
+  `tokens_used <= token_budget` and `truncated == true` at a 32-token budget — the headline claim
+  enforced against the running binary, not only in unit tests.
+- **`scripts/verify-all.mjs`** runs all nine suites and prints an explicit `unverified` block for what
+  it could not execute; today that is 7 passed / 0 failed / 2 skipped (cargo absent → core + desktop).
+- **`cortex-core/API.md`** documents the HTTP surface from the structs: `NodeDto`/`EdgeDto` fields,
+  why a node has no stored `confidence` (edges carry it; retention is computed), 400 vs 422, the real
+  WS kinds (`WS_SYNAPSE_PULSE`, `WS_DECAY`, `sweep`, `ping`), inbound frames never read, and the 501 list.
+- **`SECURITY.md`** replaces boilerplate with the actual model: plaintext file at rest, `?key=`
+  rationale and warning, recalled memory as durable prompt-injection vector with what mitigates it,
+  rate limit ≠ ACL, and a hardening checklist.
+- **`.github/`**: issue forms (ask for `/health` + commit), PR template = the honesty checklist,
+  Dependabot for cargo/npm/actions. No `cortex-core/Cargo.lock` exists, so cargo entries resolve on
+  first run; `cortex-py` is excluded because it has zero dependencies.
+
+## Caught by re-running instead of remembering
+
+Three bugs in this cycle were only found by executing something rather than trusting
+a mental model of it — worth recording because they are the same failure mode the audit
+accused the codebase of:
+
+- The CI file asserted `require('./dist/index.cjs').CortexClient` on `cortex-js`. That class
+  has never existed; the SDK exports `Cortex` / `Client` / `CortexError`. The check would
+  have failed CI for no reason and taught nobody anything. The artifact audit now lives in
+  the package (`scripts/check-dist.mjs`, run as `npm run verify` and `prepublishOnly`).
+- `cortex-mcp/package-lock.json` still declared version `1.0.0` after the manifests were
+  unified. `scripts/check-versions.mjs` found it on its first run, which is the point of it
+  (it now covers 14 files, including lockfiles, and its rewrite mode leaves lockfiles
+  byte-identical apart from the version fields).
+- Earlier, `setup-cursor-mcp.sh` would overwrite an unparseable config instead of refusing,
+  and wrote `CORTEX_API_KEY: ""` when no key was set. Both were found by
+  `scripts/test-setup-merge.mjs`, not by reading the script.
+
+Rule for anyone continuing this: if a claim in this repo is checkable by running a command,
+run the command in the same session that writes the claim.
+
+## Next, in the order that buys the most trust per hour
+
+1. Green CI on this branch — needs a PR or the workflow on `main` (see above); it fixes the
+   "never compiled" caveats in items 1 and 2, and `cargo fmt` will land its own commit.
+2. Manual Chrome pass with a real core (60 min), then file the Chrome Web Store listing text
+   that `cortex-extension/README.md` already drafts.
+3. Decide the npm story: `@cortex/mcp` scope, or publish `cortex-mcp-server` from this repo and
+   update the install lines in all five READMEs and the landing page in one commit.
+4. 20-user private beta through the MCP path only (the extension and the desktop app can wait for
+   a signing story) — measure D7 recall accuracy, not installs.
+5. Then, and only then, the hosted core + billing that the pricing page currently advertises as
+   unbuilt.
+
+## Third pass: `main` moved underneath the branch, so the two implementations had to be reconciled
+
+While I was waiting for CI to run, `main` gained a commit — `07a3fe4`
+"fix(core): Address production blockers and unify monorepo", +24,963 lines across 110 files,
+which merged `landing-site` back in and then re-implemented the audit's fix list. It touches the
+same files the branch rewrote, so PR #1 flipped to `CONFLICTING` (17 files).
+
+Reconciliation, and how each call was made:
+
+| Overlap | Kept | Why |
+| --- | --- | --- |
+| `cortex-core/src/api/server.rs`, `storage/graph_db.rs`, `storage/vector_db.rs` | branch | theirs wires `crate::storage::working_memory::WorkingMemory`, a module the branch deleted; taking it would reintroduce a dependency on Redis-backed state and undo the owner scoping, the loopback/CORS/auth ordering, and the honest `501`s. Their `graph_db`/`vector_db` additions turned out to be the same functions the branch already has (`find_node_by_label`, `get_*_by_owner`, `sweep_decay`, `deterministic_point_id`, `compute_local_embedding`) — diffed name by name, nothing unique to port. |
+| `cortex-extension/*` (5 files) | branch | their version posts the composer request body without the consent gate and rewrites `parts[0]` (the image-turn corruption); the branch version is consent-gated, string-parts-only, and covered by 12 logic checks + the manifest audit. |
+| `cortex-mcp/index.js`, `package.json` | branch | branch has 9 tools, `isError` on failures, realpath'd `cortex://` allowlist, secret scrubbing, and `scripts/smoke.mjs` (28 checks). |
+| `cortex-js/*`, `cortex-py/cortex/client.py`, `setup-cursor-mcp.sh` | branch | same surface, but the branch's SDKs carry `CortexError` with per-code fix hints, 9 + 10 tests, and a `dist` audit that fails on a bad publish. Their Python package is `cortex/`, mine is `cortex_py/` — kept one layout instead of shipping two competing packages; renaming to `import cortex` is a one-commit follow-up if preferred. |
+| `cortex-frontend/app/dashboard/page.tsx`, `cortex-desktop/src-tauri/tauri.conf.json` | branch | branch version is the one with six real UI states, `?demo=1` gating, `/api/core` proxying and the hydrator tests; desktop keeps `cortex-core` as a path dependency of the workspace Tauri config. |
+| `.cursor/mcp.json`, `errors found.md` | main | user-authored local config and notes; no code. `.cursor/mcp.json` hardcodes `/Users/aryansharma/Desktop/CORTEX/...`, which is correct for that machine and wrong for everyone else — that is exactly why `setup-cursor-mcp.sh` writes `~/.cursor/mcp.json` instead. |
+| `cortex-core/Cargo.lock` | branch (absent) | the branch does not commit the core lockfile; `cortex-desktop/src-tauri/Cargo.lock` is kept because it was generated by a real `cargo` and matches the Tauri 2 manifest. |
+
+The merge also brought **two Rust tests** in `cortex-core/tests/engine_tests.rs` that were worth
+naming: `test_briefing_label_resolution` built its own `HashMap` of labels and its own
+`format!("Fact: {} -> [{}] -> {}")` loop, and `test_token_budget_truncation` truncated a string
+inside the test and asserted on that. Neither called the crate, so both would have stayed green
+forever — including on a core that returned raw `node:` ids and ignored the budget. Rewritten to
+call `engine::recall::render_briefing` and `types::estimate_tokens`, which is what the launch
+actually needs proven. One real detail surfaced while doing that: `render_briefing` counts tokens
+on the untrimmed buffer and returns the trimmed string, so `tokens_used` may exceed
+`estimate_tokens(briefing)` by one; the test tolerates that slack instead of hiding it.
+
+Relative to the branch tip, the merge changed three files. The parallel implementation and mine
+converged on the same diagnosis — the branch was already ahead on wiring, not on ideas.
+
+## Fourth pass: the first real CI run, and the four things it caught that I could not
+
+Actions started producing runs on the merge commit (`7f4b95d`) — 13 jobs, 8 passed, 5 failed.
+The log *files* are unreachable from this sandbox (`results-receiver.actions.githubusercontent.com`
+and the Azure blob host both die with EOF), so everything below came from job/step metadata and
+annotations plus local reasoning about the exit codes.
+
+| Job | Result | Cause |
+| --- | --- | --- |
+| `cortex-core (fmt · clippy · test)` | fail, exit 101 at **Resolve dependencies** | `tower = "0.7"` in `[dev-dependencies]`. **tower never released 0.7** — I invented the number. `cargo generate-lockfile` died before compiling anything. Now pinned `0.4`, which is what axum 0.7 and tower-http 0.5 depend on, so `ServiceExt::oneshot` shares one `tower-service` 0.3 trait with the router under test. |
+| `cortex-js (build + contract tests)` | fail, exit 9 | `npm run verify` calls `node --experimental-strip-types`, which does not exist on **Node 20** — the version CI installed, while my shell has 22.22.3. The tests passed locally *only* because of that difference: a genuine false green I had reported as verified. |
+| `cortex-frontend (types + tests + build)` | fail, exit 9 | same flag, same reason. |
+| `cortex-desktop (tauri config + cargo check)` | fail, exit 1 at "Validate tauri.conf.json" | the config had **no `security` key at all**, so the one-line validator threw `TypeError: Cannot read properties of undefined` — it never got to say what was wrong. Two fixes: a real CSP, and a validator that names the failing rule. |
+| `Vercel` | fail in 0s | project Root Directory still points at the repo root; not a repo bug (see the README deploy note). |
+
+What the run *did* prove, on GitHub's own hardware: `cortex-mcp` stdio smoke on
+ubuntu-20 / ubuntu-22 / macos-20 / macos-22, `cortex-extension` manifest audit + harvest logic,
+`setup-cursor-mcp.sh` merge safety on ubuntu + macos, `cortex-py` on 3.9 and 3.12, and repo
+hygiene (14 manifests agreeing on `0.1.0`). Those ten jobs are the first machine-verified
+evidence this project has had.
+
+Fixes applied, each re-checked locally:
+
+- `tower = "0.4"` with a comment saying why, because the failure mode was a version that does not exist.
+- `security.csp` in `cortex-desktop/src-tauri/tauri.conf.json`:
+  `default-src 'self'; script-src 'self'; style-src 'self'; … connect-src 'self' ipc:
+  http://ipc.localhost http://127.0.0.1:3030 ws://127.0.0.1:3030; object-src 'none'`.
+  Chosen to be enforceable rather than decorative: `cortex-desktop/src/index.html` loads exactly
+  one external module and has no inline script or style attribute, so `script-src 'self'` and
+  `style-src 'self'` can stay strict. `connect-src` must keep the core's origin or the desktop
+  app cannot talk to itself.
+- The desktop validator is now a literal block that reports the failing rule. Executed both ways
+  locally: exit 0 on the real config, exit 1 with a sentence on a config with `security` deleted.
+- CI installs Node 22 for `sdk-js` and `frontend`. The `test` scripts in both packages now check
+  the runtime first and print what to do instead of dying with node's "bad option" exit 9.
+- `scripts/verify-all.mjs` gained `needsNode: "22.6"` for those two suites, so a contributor on
+  Node 20 sees `skip (Node 20.x < 22.6)` rather than a failure that looks like a broken checkout.
+
+Things this run still does not tell us, stated plainly:
+
+- `cargo fmt` and `cargo clippy` are `continue-on-error: true`, so style drift and lints will not
+  fail the build yet. They get flipped once one run is clean on both.
+- The desktop job died at its Node step, so **the desktop crate's dependency pins have never been
+  resolved by cargo either** — the `tower` class of bug may well be sitting there. Same for
+  `cargo check` on the Tauri Rust side.
+- The core smoke test asserts only on `/health` fields; the release build itself is the real risk
+  (surrealdb is a non-optional dependency, so the build is long — that is a launch cost worth
+  revisiting, not a correctness question).
+- One honest consequence for my earlier reporting: the verification table in this file claimed
+  the JS SDK and frontend suites were "green". They were green **on my runtime**, and CI on a
+  supported LTS proved the scripts are not portable. Anything in this ledger that says "verified"
+  for a Rust crate still means *unverified*, and anything that says verified for Node now means
+  "verified on Node 22".
+
+## Fifth pass: run #2, and the fact that a failing CI I cannot read is barely better than none
+
+`c50a484` → **12 of 14 jobs pass** (`gh run view 34585419607`). The Node 22 bump fixed both JS
+jobs, the desktop validator now passes, and `cargo generate-lockfile` got through the `tower 0.4`
+pin — so the core job reached real compilation and died at **`cargo test` (exit 101)**: the 61
+Rust tests have never been compiled, and now something in them does not typecheck. `cortex-desktop`
+died at `cargo check` for the same reason.
+
+Being told "exit 101" is not feedback. The log endpoints that carry the actual rustc output are
+unreachable from this environment, so the workflow now carries the diagnostics to the API instead:
+
+- `Format`, `Clippy`, `Test`, `Build (release)`, and the desktop `cargo check` each `tee` to
+  `/tmp/{fmt,clippy,test,build,check}.log` (with `set -o pipefail`, so `| tee` cannot swallow the
+  exit code — a `cmd | tee` chain without it turns a failing compile into a green step, which is
+  the same false-green class as the Node flag bug).
+- `--message-format short` is passed to clippy/test/build so one diagnostic fits one line.
+- `.github/scripts/report-cargo.sh` runs under `if: always()` and emits each log as a check-run
+  annotation (`::error title=cargo test::…`), which I can read with
+  `gh api /repos/…/check-runs/<id>/annotations`.
+
+Two real bugs were caught while testing that script, both worth recording because they are the
+reason this pattern is dangerous: (1) the first draft greped `^error`, which matches rustc's human
+format but misses *every* diagnostic in `short` format (`src/file.rs:12:5: error: …`) — a reporter
+that quietly reports nothing; (2) an annotation payload must be one line and needs `%`/`::`
+percent-encoded or GitHub reads them as workflow-command syntax. The script is now exercised
+against synthetic logs in both formats (`bash .github/scripts/report-cargo.sh /tmp/{fmt,clippy,
+test,check,build}.log`), and it emits 5 escaped single-line annotations.
+
+Two more bugs were caught by *testing the reporting locally* rather than pushing it blind, which is
+the only reason to write a reporter at all:
+
+1. The step ran `.github/scripts/report-cargo.sh` as a relative path, but the core job sets
+   `working-directory: cortex-core`, so the file was not there and the step exited **127** — which
+   showed up in CI as another failure on top of the real one. All runner-side script calls now use
+   `$GITHUB_WORKSPACE/...`, and every reporter step is `continue-on-error: true`.
+2. `publish-diagnostics.sh` built a proper JSON check-run payload with `jq` and then piped the raw
+   log text to `gh api --input=-` instead — a first stub that accepted anything hid it, so the stub
+   now validates the JSON (`.name and .head_sha and .output.summary and .conclusion=="neutral"`) and
+   fails the way `gh` would. The channel itself is chosen because `api.github.com` is reachable here
+   while the log endpoints are not: a check run on the commit carries ~64 KB of rustc output in
+   `output.summary`, with a PR comment and single-line annotations as fallbacks, and the step always
+   prints which channels landed (`check-run=ok comment=skip`, or the 403 text when the workflow token
+   is pinned to read-only).
+
+Still `continue-on-error`: fmt and clippy, so style drift cannot fail the build. Flip both once
+the first clean pass lands.
+
+## Sixth pass: the CI loop works, and it is the only thing that has ever verified this crate
+
+The diagnostics channel is now proven end to end: `publish-diagnostics.sh` posted a check run
+(`diagnostics: cortex-core`, 41 KB of rustc output in `output.summary`) and
+`gh api /repos/…/commits/<merge-sha>/check-runs` read it back. Two details that cost runs to learn:
+
+- The check run is created on `GITHUB_SHA`, which for a `pull_request` event is **the PR merge
+  commit**, not the branch head. Querying `commits/<head>/check-runs` shows nothing and looks like a
+  broken reporter; query the merge sha (`gh api /repos/…/pulls/1 --jq .merge_commit_sha`).
+- The job-level `permissions: {checks: write, pull-requests: write}` request **was honoured** —
+  `check-run=ok`, so this repo does not pin workflow tokens to read-only. No settings change needed.
+
+`cortex-core` reached compilation and reported 10 distinct defects; every fix in `a7d92f3` is a
+direct response to a quoted error, not a hypothesis:
+
+| rustc | site | fix |
+| --- | --- | --- |
+| E0277 (Debug, Clone) | `engine/decay.rs` | `#[derive(Debug, Clone)] pub struct DecayEngine` — `CoreConfig` owns it by value and derives both. |
+| E0277 | `storage/store.rs:102` | `tokio::fs::rename(&tmp, &*self.path)` — `Arc<PathBuf>` does not implement `AsRef<Path>`; `PathBuf` does. |
+| E0603 | `ai/mod.rs:59` | `heuristic_triplets` made `pub` (it is the documented fallback extractor, called from the API layer). |
+| E0728 | `api/server.rs:1004` | `.or_else(|| store.get_node(&id).await…)` → a `match` in the async body; a sync closure cannot await. |
+| E0308 | `api/server.rs:1063` | `state.apply_overwrite(…).await` — the method is `async fn`. |
+| E0308 | `types/mod.rs` test | `predicate: "Likes Apples ".into()` — a `String` field fed a `&str`. |
+| E0382 | `api/server.rs:884` | the response body read `owner` after `async move` took it; the task now gets `owner_for_task = owner.clone()`. |
+| E0382 | `types/mod.rs:517` | `ProceduralRule::new` converted its `impl Into<String>` args twice; convert once, reuse. |
+| E0499/E0502 (×7) | `storage/session.rs:77-88` | the `entry` borrow of `inner.sessions` now ends in a scoped block before `inner.order`/`inner.inserted` are touched; `full` is captured inside and returned. |
+| E0609 | `storage/vector_db.rs:279` | Qdrant's `UpdateResult` has no `deleted` field. `delete_for_nodes` now returns the number of point ids **submitted**, and the doc comment says so rather than inventing a per-point tally. |
+| unused imports / needless `mut` | `engine/recall.rs:14,267` | dropped `DEFAULT_OWNER`, `strip_id_prefix`; `let push = …` (it takes `&mut` parameters, so it never needed a mutable binding). |
+
+After editing, brace/paren balance was re-checked per file **against HEAD**, because my naive
+masker reports `-1` for `server.rs` at HEAD too (raw JSON string literals) — comparing to HEAD is
+what makes the check meaningful instead of alarming.
+
+Not yet known: whether those 10 fixes make `cargo test` pass. The commit is local; the sandbox's
+GitHub token expired mid-loop (`The github.com token in GH_TOKEN is no longer valid`), so the next
+verdict needs a reconnect. That is the honest boundary: **61 Rust tests still have never executed**,
+but for the first time they are being compiled and reported on by something other than me.
+
+Deferred, deliberately: `cargo fmt` produced 81 KB of diffs (`/tmp/fmt.log`, also in that check run).
+`Format` and `Clippy` stay `continue-on-error` while compile errors exist — cosmetic churn and real
+bugs must not be fixed in the same commit. Once the crate compiles and tests pass, the fmt patch can
+be applied in one pass and both gates flipped to fatal.
+
+## Seventh pass: the second CI round, and what a fast loop is actually for
+
+Round 2 dropped `cortex-core` from 10 compile errors to **2 — both introduced by my own fix** from
+round 1, which is the point of having the loop instead of reasoning: scoping the `entry` borrow left
+`let mut full = false;` dead before it was read (unused-assignments, fatal here), and
+`inner.order.insert(id, inner.inserted)` borrows the `MutexGuard` mutably and immutably at once —
+field-disjointness does not save you when the fields live behind a guard. Both fixed (declare `full`
+uninitialised; read the sequence number once into a local).
+
+`cortex-desktop` was never a Rust problem: `tauri-build` rejected `bundle.windows.nsis.installModes`
+as an unknown field — the config was written against a newer Tauri schema than the pinned crate.
+`installModes: ["perUser"]` is that crate's default anyway, so the field is dropped rather than
+renamed into a shape I cannot verify, and `cargo update` in `cortex-desktop/src-tauri` is the way to
+get the option back if a per-machine installer is ever wanted.
+---
+
+## Sixth pass: the desktop crate's last 2 errors, and the frontend's hidden landmine
+
+**`cortex-desktop/src-tauri/src/lib.rs` — `error[E0599]: no method named \`query\` found for struct \`RequestBuilder\``.** reqwest 0.13 moved `serde_urlencoded` behind an optional feature, so `query()` is not part of what our `features = ["json"]` guarantees. Two ways out: add a feature name I could not verify from here (no cargo, and crates.io's API is unreachable), or stop calling the method. Three parameters across two call sites, so I hand-encoded them (`encode_query`), with the unreserved set taken from RFC 3986. The encoder is checked against Node's `URLSearchParams` for exactly the strings this app produces — `cortex://default`, `cortex://user#memory-1` — and agrees (`%20` where the form-encoded convention would emit `+`, which is the correct form inside a URL path+query and decodes the same in axum). Comment says why, so the next person does not "simplify" it back to `.query()`.
+
+**`cortex-frontend/components/synaptic-network.tsx` — deleted, 454 lines, imported by nothing.** It was the old 2D brain: fabricated neurons as the *default* state and a hardcoded `http://localhost:3030/v1/resolve` plus `ws://localhost:3030/ws`, bypassing the `/api/core` proxy and the API key. After `/dashboard/brain` was rewritten, it stayed behind as a landmine: wire it up and the dashboard shows fake memories and fails with mixed content on any https deploy. `components/ui/button.tsx` (the shadcn leftover the README already claimed was gone) went with it, along with `class-variance-authority`, which nothing else used. `tsc --noEmit` and `next build` pass after the deletion.
+
+**`.github/workflows/ci.yml` — my own insertion produced invalid YAML.** I spliced a step in with a string slice and lost the indentation; caught by parsing the file with a YAML parser locally rather than pushing it blind. Lesson recorded where it belongs: any edit to a workflow ends with a parse, not a look.
+
+---
+
+## Seventh pass: core compiles; two doc lies and a mute reporter
+
+Round `34597264095` (head `9d22c54`) is **13/14 green**: `cortex-desktop` passed `cargo check` end to end, and `cortex-core` now compiles too — its remaining failure is clippy's `-D warnings` plus test assertions. The 5 lints were 3 "field never read" and 2 useless casts; two of the three fields were not style problems but **documentation over-promises**:
+
+- `IngestRequest.session_id` — `API.md` listed it in the ingest request body, which reads as "ingest buffers into that session". It does not, and must not: a transcript extracted on the way in would be extracted a second time at `/v1/flush`. The field is now documented as accepted-for-shape-compatibility and unused, with the reason in the struct.
+- `LockRequest.label` — `API.md` showed `{"locked": true, "label": "SurrealDB"}`, implying rename. Ids are content-addressed from the label (`node_id_for_label`), so honouring it would insert a second node and leave the first locked-but-orphaned. Docs now say the key is tolerated and ignored, and that renaming is `forget` + `remember`.
+- `CloudSyncNode.user_id` — sync returns 501 `not_wired`; the field is kept for the handle's round-trip and says so.
+
+`.github/scripts/report-cargo.sh` reported "no diagnostic lines found" on a run whose tests genuinely failed: it matched only rustc's `error|warning:` shape, and a green compile with red assertions has no such lines. A reporter that is silent on a real failure is worse than no reporter, because it reads as "nothing to report". The test branch now matches panics, assertion lines and the indented failure list; verified against a synthetic log (it reproduces the test name, `recall.rs:220:9`, and `left: 600 / right: 500`).

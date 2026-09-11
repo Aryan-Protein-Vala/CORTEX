@@ -37,13 +37,22 @@ impl StateOverwriteEngine {
                     edge.is_historical = true;
                     edge.weight = 0.0;
                     
-                    // Create new edge anchored to the same original concept nodes
-                    let new_edge = RelationalEdge::new(
+                    // Create the new edge anchored to the *same* concept nodes, in
+                    // the same namespace. Losing `owner_uri` here would move the
+                    // correction into `cortex://default` and hide it from the
+                    // owner-scoped reads that power recall and the 3D brain.
+                    let mut new_edge = RelationalEdge::between(
                         &edge.source,
                         &new_triplet.predicate,
                         &edge.target,
-                        0.95 // High initial weight for a direct correction
+                        0.95, // High initial weight for a direct correction
+                        &edge.owner_uri,
                     );
+                    new_edge.confidence = new_triplet.confidence.max(edge.confidence);
+                    new_edge.impact = new_triplet.impact.max(edge.impact);
+                    new_edge.provenance = edge.provenance.clone();
+                    // A protected fact stays protected after it is corrected.
+                    new_edge.locked = edge.locked;
                     
                     return Ok(Some(new_edge));
                 }

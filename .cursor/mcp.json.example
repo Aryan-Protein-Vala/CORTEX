@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "node",
+      "args": ["/ABSOLUTE/PATH/TO/CORTEX/cortex-mcp/index.js"],
+      "env": {
+        "CORTEX_API_URL": "http://127.0.0.1:3030",
+        "CORTEX_OWNER": "cortex://default",
+        "CORTEX_API_KEY": ""
+      }
+    }
+  }
+}

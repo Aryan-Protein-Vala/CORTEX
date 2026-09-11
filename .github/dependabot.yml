@@ -1,0 +1,51 @@
+# Dependency freshness for a project with no maintainers' time to spare: narrow surface,
+# low noise, and every ecosystem this repo actually builds from.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: tuesday, time: "03:00" }
+    open-pull-requests-limit: 3
+    labels: [chore, dependencies]
+
+  - package-ecosystem: cargo
+    directory: /cortex-core
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 3
+    labels: [cortex-core, dependencies]
+    ignore:
+      # surrealdb 1.x and qdrant-client track server versions; a major bump here is a
+      # migration decision, not a dependency chore.
+      - dependency-name: surrealdb
+        update-types: [version-update:semver-major]
+      - dependency-name: qdrant-client
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: cargo
+    directory: /cortex-desktop/src-tauri
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    labels: [cortex-desktop, dependencies]
+
+  - package-ecosystem: npm
+    directories:
+      - /cortex-mcp
+      - /cortex-js
+      - /cortex-frontend
+      - /cortex-desktop
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    labels: [chore, dependencies]
+    groups:
+      next-and-react:
+        patterns:
+          - next
+          - react
+          - react-dom
+          - "@types/react*"
+      minor-and-patch:
+        update-types: [minor, patch]
+        exclude-patterns:
+          - next
+          - react
+          - react-dom

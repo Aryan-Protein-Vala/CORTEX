@@ -1,7 +1,17 @@
 [package]
 name = "cortex-core"
 version = "0.1.0"
+description = "Local-first memory graph for AI: capture, extract, decay, recall."
+authors = ["Aryan Sharma"]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/Aryan-Protein-Vala/CORTEX"
 edition = "2021"
+
+# `--bin cortex-core` is what the docs, scripts and CI use, so it is declared
+# rather than inferred from the package name.
+[[bin]]
+name = "cortex-core"
+path = "src/main.rs"
 
 [dependencies]
 # Async runtime
@@ -11,15 +21,16 @@ tokio = { version = "1.35", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# Database clients
+# Database clients — all optional at runtime (the session buffer in storage/session.rs
+# replaced the old Redis/Dragonfly working-memory path, and that module is gone).
+# Surreal/Qdrant light up only when their env vars are set; the default backend is a JSON file.
 surrealdb = "1.5"
-redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 qdrant-client = "1.7"
 
 # HTTP API
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 axum = { version = "0.7", features = ["ws"] }
-tower-http = { version = "0.5", features = ["cors"] }
+tower-http = { version = "0.5", features = ["cors", "timeout", "limit", "trace", "catch-panic"] }
 
 # RPC
 tonic = "0.10"
@@ -34,3 +45,18 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.10"
 base64 = "0.21"
+
+[profile.release]
+# Small, deterministic single-binary builds for the installer path. A panic in a
+# handler is still caught (CatchPanicLayer) because unwinding is left enabled.
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[dev-dependencies]
+# Drives the router in-process (no socket) for the API contract tests.
+# 0.4, not 0.7: the 0.7 pin made `cargo generate-lockfile` fail in CI after 6s
+# (no compile) because tower never released 0.7. 0.4 is what axum 0.7 and tower-http 0.5
+# sit on, so ServiceExt::oneshot shares one tower-service 0.3 trait.
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"

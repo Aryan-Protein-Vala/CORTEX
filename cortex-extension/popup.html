@@ -1,40 +1,127 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Cortex Settings</title>
-  <link rel="stylesheet" href="popup.css">
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <span class="logo">Cortex<span>.</span></span>
-      <span id="status-indicator" class="status pulse">● CHECKING CORE...</span>
-    </div>
-    
-    <div class="content">
-      <p class="eyebrow">HIVE MIND CONNECTION</p>
-      <div class="stat-box">
-        <span class="label">Memory Intercept</span>
-        <label style="display:flex; align-items:center; cursor:pointer;">
-          <input type="checkbox" id="cortex-toggle" checked style="cursor:pointer;" />
+  <head>
+    <meta charset="UTF-8" />
+    <title>CORTEX</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <span class="logo">CORTEX</span>
+        <span id="status" class="status">checking…</span>
+      </header>
+
+      <section id="consent" class="panel consent" hidden>
+        <h2>Nothing is being remembered yet</h2>
+        <p>
+          CORTEX reads this browser tab's conversation and stores durable facts in
+          <strong>your own core</strong> — the address below. No CORTEX server is
+          involved. You can pause, inspect and delete everything at any time.
+        </p>
+        <label class="row">
+          <span>What should it do?</span>
+          <select id="consent-mode">
+            <option value="remember">Only remember (safest, default)</option>
+            <option value="composer">Remember + insert memory into my composer</option>
+            <option value="request">Remember + rewrite the outgoing request (experimental)</option>
+          </select>
         </label>
-      </div>
-      <div class="stat-box">
-        <span class="label">Core Latency</span>
-        <span id="latency-val" class="value mono">...</span>
-      </div>
-      <div class="stat-box">
-        <span class="label">Context Budget</span>
-        <span class="value mono">500 tk</span>
-      </div>
-    </div>
-    
-    <div class="footer">
-      <button id="sync-btn" class="button">Force Sync Memory</button>
-      <p class="micro">Permanent memory. Universal AI protocol.</p>
-    </div>
-  </div>
-  <script src="popup.js"></script>
-</body>
+        <div class="actions">
+          <button id="consent-accept" class="button primary">Turn on CORTEX</button>
+          <button id="consent-decline" class="button ghost">Not now</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="stat">
+          <span class="label">Core</span>
+          <span id="core-url" class="value mono">—</span>
+        </div>
+        <div class="stat">
+          <span class="label">Namespace</span>
+          <span id="owner" class="value mono">—</span>
+        </div>
+        <div class="stat">
+          <span class="label">Buffered turns</span>
+          <span id="buffered" class="value mono">0</span>
+        </div>
+        <div class="stat">
+          <span class="label">Budget</span>
+          <span id="budget" class="value mono">—</span>
+        </div>
+        <div class="actions">
+          <button id="pause" class="button ghost">Pause</button>
+          <button id="flush" class="button ghost">Remember now</button>
+          <button id="inject" class="button ghost">Insert into page</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Remember a fact right now</h2>
+        <textarea id="fact" rows="2" placeholder="e.g. always run pnpm install --frozen-lockfile in CI"></textarea>
+        <div class="actions">
+          <button id="store" class="button primary">Store</button>
+          <span id="store-result" class="micro"></span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>What CORTEX stored recently</h2>
+        <ul id="log" class="list"><li class="empty">nothing yet</li></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Your memories <button id="refresh-memories" class="mini">reload</button></h2>
+        <ul id="memories" class="list"><li class="empty">not loaded</li></ul>
+      </section>
+
+      <details class="panel settings">
+        <summary>Settings</summary>
+        <label class="row">
+          <span>Core URL</span>
+          <input id="set-url" type="url" placeholder="http://127.0.0.1:3030" />
+        </label>
+        <label class="row">
+          <span>API key</span>
+          <input id="set-key" type="password" placeholder="matches CORTEX_API_KEY" />
+        </label>
+        <label class="row">
+          <span>Owner namespace</span>
+          <input id="set-owner" type="text" placeholder="cortex://default" />
+        </label>
+        <label class="row">
+          <span>Token budget</span>
+          <input id="set-budget" type="number" min="32" max="4000" step="16" />
+        </label>
+        <label class="row">
+          <span>Idle flush (s)</span>
+          <input id="set-idle" type="number" min="10" max="600" step="5" />
+        </label>
+        <label class="row">
+          <span>Injection mode</span>
+          <select id="set-mode">
+            <option value="remember">remember only</option>
+            <option value="composer">composer insert</option>
+            <option value="request">request rewrite</option>
+          </select>
+        </label>
+        <p class="micro warn">
+          “Request rewrite” changes what is sent to the AI site and depends on their private API
+          shape, so it can break without warning. It never invents a message part and gives up rather
+          than corrupt your text.
+        </p>
+        <div class="actions">
+          <button id="save" class="button primary">Save</button>
+          <button id="test" class="button ghost">Test connection</button>
+          <span id="settings-result" class="micro"></span>
+        </div>
+      </details>
+
+      <footer class="footer">
+        <span class="micro">Local-first memory. Your graph never leaves the core you point at.</span>
+      </footer>
+    </main>
+    <script src="popup.js"></script>
+  </body>
 </html>

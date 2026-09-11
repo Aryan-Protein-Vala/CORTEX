@@ -1,36 +1,73 @@
 {
   "manifest_version": 3,
-  "name": "Cortex Gigabrain Injector",
-  "version": "1.0.0",
-  "description": "Injects the Cortex Hive Mind memory directly into ChatGPT and Claude.",
+  "name": "CORTEX \u2014 memory for your AI chat",
+  "version": "0.1.0",
+  "description": "Turns ChatGPT, Claude and Gemini chats into a local memory graph, then injects your preferences back as context.",
   "minimum_chrome_version": "111",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "CORTEX memory",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
   "permissions": [
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
-    "https://chatgpt.com/*",
-    "https://claude.ai/*",
     "http://localhost:3030/*",
     "http://127.0.0.1:3030/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://chatgpt.com/*", "https://claude.ai/*"],
-      "js": ["inject.js"],
-      "world": "MAIN",
-      "run_at": "document_start"
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "harvest-core.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
     },
     {
-      "matches": ["https://chatgpt.com/*", "https://claude.ai/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "harvest-core.js",
+        "inject.js"
+      ],
+      "world": "MAIN",
       "run_at": "document_start"
     }
   ],
-  "action": {
-    "default_title": "Cortex Settings",
-    "default_popup": "popup.html"
+  "commands": {
+    "cortex-inject": {
+      "suggested_key": {
+        "default": "Alt+Shift+C"
+      },
+      "description": "Insert your CORTEX memory block into the chat composer"
+    }
   }
 }

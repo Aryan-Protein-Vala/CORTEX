@@ -1,14 +1,17 @@
 {
-  "name": "cortex-memory-mcp",
-  "version": "1.0.0",
-  "description": "Cortex MCP Server to inject persistent memory and global mesh context into Cursor, Claude Desktop, and Windsurf.",
+  "name": "cortex-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that gives Cursor, Claude Desktop and Windsurf persistent memory backed by a local CORTEX core.",
   "main": "index.js",
   "bin": {
-    "cortex-memory-mcp": "./index.js"
+    "cortex-mcp": "./index.js"
   },
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "check": "node --check index.js",
+    "smoke": "node scripts/smoke.mjs",
+    "test": "node --check index.js && node scripts/smoke.mjs"
   },
   "keywords": [
     "cortex",
@@ -22,14 +25,25 @@
     "ai-agent"
   ],
   "author": "Cortex Core Team",
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-or-later",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.1",
     "zod": "^3.23.8"
   },
   "files": [
     "index.js",
+    "scripts/smoke.mjs",
     "package.json",
     "README.md"
-  ]
+  ],
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aryan-Protein-Vala/CORTEX.git",
+    "directory": "cortex-mcp"
+  },
+  "homepage": "https://github.com/Aryan-Protein-Vala/CORTEX/tree/main/cortex-mcp#readme",
+  "private": true
 }

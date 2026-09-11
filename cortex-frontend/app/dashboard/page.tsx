@@ -1,293 +1,498 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Activity, Flame, ArrowRight, CheckCircle2, Search } from 'lucide-react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { Activity, Flame, ArrowRight, Search, RotateCw } from 'lucide-react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { core, describeFailure, type IngestReport, type RecallResult, type SweepReport } from '@/lib/core'
+import { timeAgo, useCore, useCoreSocket, type PanelState } from '@/lib/use-core'
 
-// The landing page Graph component (local to avoid mutating app/page.tsx)
-function Graph({ active = 4, isLive = false, meshMode = false }: { active?: number; isLive?: boolean, meshMode?: boolean }) {
-  const [activeNodes, setActiveNodes] = useState(active);
-  
-  useEffect(() => {
-    if (!isLive || typeof window === 'undefined') return;
-
-    let ws: WebSocket | null = null;
-    try {
-      const wsUrl = process.env.NEXT_PUBLIC_CORTEX_WS_URL || "ws://localhost:3030/ws";
-      ws = new WebSocket(wsUrl);
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'WS_SYNAPSE_PULSE') {
-            setActiveNodes(prev => Math.min(prev + 1, 8));
-          } else if (data.type === 'WS_DECAY') {
-            setActiveNodes(prev => Math.max(prev - 1, 0));
-          }
-        } catch { /* Ignored */ }
-      };
-
-      ws.onerror = () => { /* Silently handle offline */ };
-    } catch { /* Ignored */ }
-    
-    return () => {
-      if (ws) ws.close();
-    };
-  }, [isLive]);
-
-  const points = [[32,90],[100,45],[168,112],[240,46],[305,98],[370,38],[430,104],[492,55]];
-  const edges = [[0,1],[1,2],[1,3],[2,3],[2,4],[3,5],[4,5],[4,6],[5,7],[6,7]];
-  
-  const meshPoints = [[60, 20], [140, 10], [220, 140], [280, 20], [350, 130], [420, 15], [480, 120]];
-  const meshEdges = [[0,1], [2,4], [3,5], [4,6], [1,3], [0,2]];
+/* Decorative schematic of a memory graph. It is labelled as a schematic and is
+   aria-hidden: the numbers below it are the real measurements. */
+function Graph({ active, total, mesh }: { active: number; total: number; mesh: boolean }) {
+  const points = [
+    [32, 90],
+    [100, 45],
+    [168, 112],
+    [240, 46],
+    [305, 98],
+    [370, 38],
+    [430, 104],
+    [492, 55],
+  ]
+  const edges = [
+    [0, 1],
+    [1, 2],
+    [1, 3],
+    [2, 3],
+    [2, 4],
+    [3, 5],
+    [4, 5],
+    [4, 6],
+    [5, 7],
+    [6, 7],
+  ]
+  const meshPoints = [
+    [60, 20],
+    [140, 10],
+    [220, 140],
+    [280, 20],
+    [350, 130],
+    [420, 15],
+    [480, 120],
+  ]
+  const meshEdges = [
+    [0, 1],
+    [2, 4],
+    [3, 5],
+    [4, 6],
+    [1, 3],
+    [0, 2],
+  ]
+  const lit = total === 0 ? 0 : Math.max(1, Math.min(8, Math.round((active / Math.max(1, total)) * 8)))
 
   return (
-    <svg className="graph" viewBox="0 0 525 150" role="img" aria-label="Cortex memory graph visualization" style={{ width: '100%', maxWidth: '525px' }}>
+    <svg
+      className="graph"
+      viewBox="0 0 525 150"
+      aria-hidden="true"
+      style={{ width: '100%', maxWidth: 525 }}
+    >
       <AnimatePresence>
-        {meshMode && (
+        {mesh && (
           <motion.g initial={{ opacity: 0 }} animate={{ opacity: 0.4 }} exit={{ opacity: 0 }}>
-            {meshEdges.map(([a,b], i) => <path key={`mesh-e-${i}`} d={`M${meshPoints[a][0]} ${meshPoints[a][1]} L ${meshPoints[b][0]} ${meshPoints[b][1]}`} className="graph-path global-mesh" />)}
-            {meshPoints.map(([x,y], i) => <circle key={`mesh-n-${i}`} cx={x} cy={y} r={3} className="graph-node global-mesh" />)}
+            {meshEdges.map(([a, b], i) => (
+              <path
+                key={`mesh-e-${i}`}
+                d={`M${meshPoints[a][0]} ${meshPoints[a][1]} L ${meshPoints[b][0]} ${meshPoints[b][1]}`}
+                className="graph-path global-mesh"
+              />
+            ))}
+            {meshPoints.map(([x, y], i) => (
+              <circle key={`mesh-n-${i}`} cx={x} cy={y} r={3} className="graph-node global-mesh" />
+            ))}
           </motion.g>
         )}
       </AnimatePresence>
-      
-      {edges.map(([a,b], i) => <path key={`e-${i}`} d={`M${points[a][0]} ${points[a][1]} Q ${(points[a][0]+points[b][0])/2} ${(points[a][1]+points[b][1])/2-25} ${points[b][0]} ${points[b][1]}`} className={i < activeNodes ? 'graph-path active' : 'graph-path'} style={{ animationDelay: `${i * 110}ms` }} />)}
-      {points.map(([x,y], i) => <circle key={`n-${i}`} cx={x} cy={y} r={i < activeNodes ? 5 : 3} className={i < activeNodes ? 'graph-node active' : 'graph-node'} style={{ animationDelay: `${i * 140}ms` }} />)}
+      {edges.map(([a, b], i) => (
+        <path
+          key={`e-${i}`}
+          d={`M${points[a][0]} ${points[a][1]} Q ${(points[a][0] + points[b][0]) / 2} ${
+            (points[a][1] + points[b][1]) / 2 - 25
+          } ${points[b][0]} ${points[b][1]}`}
+          className={i < lit ? 'graph-path active' : 'graph-path'}
+          style={{ animationDelay: `${i * 110}ms` }}
+        />
+      ))}
+      {points.map(([x, y], i) => (
+        <circle
+          key={`n-${i}`}
+          cx={x}
+          cy={y}
+          r={i < lit ? 5 : 3}
+          className={i < lit ? 'graph-node active' : 'graph-node'}
+          style={{ animationDelay: `${i * 140}ms` }}
+        />
+      ))}
     </svg>
   )
 }
 
-interface SynapseLog {
+type FeedEntry = {
   id: string
-  time: string
+  when: string
   source: string
   text: string
-  type: 'ingest' | 'recall' | 'decay'
+  kind: 'ingest' | 'recall' | 'decay'
+}
+
+function StatusPill({ state, message }: { state: PanelState; message: string }) {
+  const tone = state === 'ready' || state === 'empty' ? 'ok' : state === 'offline' || state === 'denied' || state === 'error' ? 'down' : 'wait'
+  const label =
+    state === 'loading'
+      ? 'CHECKING CORE…'
+      : state === 'offline'
+        ? 'CORE NOT REACHABLE'
+        : state === 'denied'
+          ? 'CORE REJECTED THE KEY'
+          : state === 'error'
+            ? 'CORE ERROR'
+            : state === 'empty'
+              ? 'CORE ONLINE · NO MEMORIES YET'
+              : 'CORE ONLINE'
+  return (
+    <span className={`core-pill ${tone}`} title={message || undefined}>
+      <i /> {label}
+    </span>
+  )
+}
+
+function Kpi({ n, title, value, note, pending }: { n: string; title: string; value: string; note: string; pending?: boolean }) {
+  return (
+    <article className="pain-card" style={{ minHeight: 'auto', padding: 24 }}>
+      <span className="card-num">{n}</span>
+      <div style={{ marginTop: 26 }}>
+        <p className="mono" style={{ margin: '0 0 6px' }}>
+          {title.toUpperCase()}
+        </p>
+        <strong className={`kpi-value${pending ? ' pending' : ''}`}>{value}</strong>
+        <p className="kpi-note">{note}</p>
+      </div>
+    </article>
+  )
+}
+
+function SkeletonBlock({ height = 12, width = '100%' }: { height?: number; width?: string }) {
+  return <span className="skeleton" style={{ height, width }} />
 }
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'feed' | 'inject' | 'recall'>('feed')
+  const { state, health, stats, memories, message, liveUpdates, lastUpdated, refresh, isRefreshing } = useCore()
   const [injectText, setInjectText] = useState('')
   const [isInjecting, setIsInjecting] = useState(false)
+  const [injectResult, setInjectResult] = useState<{ ok: boolean; text: string } | null>(null)
   const [recallPrompt, setRecallPrompt] = useState('')
-  const [recallResult, setRecallResult] = useState<string | null>(null)
+  const [recallResult, setRecallResult] = useState<{ ok: boolean; text: string; meta?: string } | null>(null)
   const [isRecalling, setIsRecalling] = useState(false)
-  const [isConnected, setIsConnected] = useState(false)
+  const [sweepResult, setSweepResult] = useState<string | null>(null)
+  const [isSweeping, setIsSweeping] = useState(false)
+  const [liveEvents, setLiveEvents] = useState<FeedEntry[]>([])
 
-  const [logs, setLogs] = useState<SynapseLog[]>([
-    { id: '1', time: '14:42:10', source: 'Cursor MCP', text: 'Queried database rules → Recalled SurrealDB graph invariants', type: 'recall' },
-    { id: '2', time: '14:38:05', source: 'Chrome Ext (ChatGPT)', text: 'Ingested: "Always use Tailwind v4 server actions"', type: 'ingest' },
-    { id: '3', time: '14:20:19', source: 'Ebbinghaus Sweep', text: 'Killed 2 useless memories (MongoDB, raw MySQL). RIP.', type: 'decay' },
-    { id: '4', time: '14:05:44', source: 'Claude Desktop', text: 'Burned rule: "Backend must use RS256 JWT auth"', type: 'ingest' },
-  ])
+  const feed = useMemo<FeedEntry[]>(() => {
+    const stored: FeedEntry[] = (memories?.memories ?? [])
+      .slice()
+      .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+      .slice(0, 14)
+      .map((node, index) => ({
+        id: `${node.id}-${index}`,
+        when: node.updated_at,
+        source: node.provenance || 'unknown',
+        text: `${node.label} · impact ${node.impact}${node.locked ? ' · locked' : ''}${node.fading ? ' · fading' : ''} · retention ${(node.retention * 100).toFixed(0)}%`,
+        kind: node.fading ? 'decay' : 'ingest',
+      }))
+    return [...liveEvents, ...stored]
+  }, [memories, liveEvents])
 
-  useEffect(() => {
-    fetch('http://localhost:3030/health').then(() => setIsConnected(true)).catch(() => setIsConnected(false))
-  }, [])
+  useCoreSocket(
+    (event) => {
+      const label =
+        event.type === 'WS_SYNAPSE_PULSE'
+          ? 'a memory was written'
+          : event.type === 'WS_DECAY'
+            ? 'the decay sweep changed retention'
+            : event.type === 'sweep'
+              ? 'decay sweep finished'
+              : event.type
+      setLiveEvents((prev) =>
+        [{ id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, when: event.at ?? new Date().toISOString(), source: 'live bus', text: label, kind: 'ingest' as const }, ...prev].slice(0, 12)
+      )
+      void refresh()
+    },
+    liveUpdates
+  )
 
-  useEffect(() => {
-    let ws: WebSocket | null = null
-    try {
-      ws = new WebSocket('ws://localhost:3030/ws')
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data)
-          if (msg.type === 'WS_SYNAPSE_PULSE') {
-            const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-            setLogs(prev => [{
-              id: Math.random().toString(36).substring(7),
-              time: now,
-              source: 'Live Bus',
-              text: msg.message || 'New memory ingested',
-              type: 'ingest'
-            }, ...prev.slice(0, 20)])
-          }
-        } catch { /* pass */ }
-      }
-    } catch { /* pass */ }
-    return () => { if (ws) ws.close() }
-  }, [])
+  const canWrite = state === 'ready' || state === 'empty'
 
-  const CORTEX_API = process.env.NEXT_PUBLIC_CORTEX_API_URL || 'http://127.0.0.1:3030'
-
-  const handleInject = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!injectText.trim()) return
+  const handleInject = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!injectText.trim() || !canWrite) return
     setIsInjecting(true)
-    const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    try {
-      const res = await fetch(`${CORTEX_API}/v1/ingest`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 'default_user', prompt: injectText })
+    setInjectResult(null)
+    const result = await core.ingest({ prompt: `USER: ${injectText.trim()}`, source: 'dashboard', wait: true })
+    setIsInjecting(false)
+    if (!result.ok) {
+      setInjectResult({ ok: false, text: describeFailure(result) })
+      return
+    }
+    const report: IngestReport | undefined = result.data.result
+    if (!report) {
+      setInjectResult({ ok: true, text: `Queued as ${result.data.job_id}. Extraction is still running — refresh in a moment.` })
+    } else if (report.triplets_extracted === 0) {
+      setInjectResult({
+        ok: false,
+        text: `Nothing durable was found in that text, so nothing was stored. State one fact at a time, e.g. "always use pnpm in CI". ${report.warnings?.length ? `(${report.warnings[0]})` : ''}`,
       })
-      if (res.ok) {
-        setLogs(prev => [{ id: Math.random().toString(36).substring(7), time: now, source: 'Dashboard', text: `Saved to memory: "${injectText.slice(0, 50)}..."`, type: 'ingest' }, ...prev])
-        setInjectText('')
-      } else {
-        setLogs(prev => [{ id: Math.random().toString(36).substring(7), time: now, source: 'Error', text: `Failed to persist: HTTP ${res.status}`, type: 'decay' }, ...prev])
-      }
-    } catch {
-      setLogs(prev => [{ id: Math.random().toString(36).substring(7), time: now, source: 'Error', text: `Cortex Core unreachable on ${CORTEX_API}`, type: 'decay' }, ...prev])
-    } finally { setIsInjecting(false) }
+    } else {
+      setInjectResult({
+        ok: true,
+        text: `Stored ${report.triplets_extracted} triplet(s), ${report.nodes_new} new node(s), ${report.edges_new} new edge(s) via ${report.extractor}.${report.warnings?.length ? ` Warning: ${report.warnings.join(' ')}` : ''}`,
+      })
+      setInjectText('')
+    }
+    void refresh()
   }
 
-  const handleRecall = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!recallPrompt.trim()) return
-    setIsRecalling(true); setRecallResult(null)
-    try {
-      const res = await fetch(`${CORTEX_API}/v1/recall`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 'default_user', prompt: recallPrompt, token_budget: 500 })
+  const handleRecall = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!recallPrompt.trim() || !canWrite) return
+    setIsRecalling(true)
+    setRecallResult(null)
+    const result = await core.recall({ prompt: recallPrompt.trim(), explain: true })
+    setIsRecalling(false)
+    if (!result.ok) {
+      setRecallResult({ ok: false, text: describeFailure(result) })
+      return
+    }
+    const data: RecallResult = result.data
+    if (!data.briefing.trim()) {
+      setRecallResult({
+        ok: false,
+        text: `No memories matched. Scanned ${data.scanned} node(s) in ${data.owner_uri}; the budget was ${data.token_budget} tokens. This is an honest empty result, not a failure.`,
       })
-      if (res.ok) {
-        const data = await res.json()
-        setRecallResult(data.briefing || data.context || 'No matching memories found for this prompt.')
-      } else {
-        setRecallResult(`[CORTEX ERROR]: Core returned HTTP ${res.status}.`)
-      }
-    } catch {
-      setRecallResult(`[CORTEX OFFLINE]: Unable to connect to Cortex Core daemon on ${CORTEX_API}. Start it with 'cd cortex-core && cargo run'.`)
-    } finally { setIsRecalling(false) }
+      return
+    }
+    setRecallResult({
+      ok: true,
+      text: data.briefing,
+      meta: `${data.memories_found} memories · ${data.tokens_used}/${data.token_budget} tokens${data.truncated ? ' · truncated to fit' : ''}${
+        data.debug?.length ? ` · top score ${data.debug[0]?.score?.toFixed(2)}` : ''
+      }`,
+    })
   }
+
+  const handleSweep = async () => {
+    if (!canWrite) return
+    setIsSweeping(true)
+    setSweepResult(null)
+    const result = await core.sweep()
+    setIsSweeping(false)
+    if (!result.ok) {
+      setSweepResult(describeFailure(result))
+      return
+    }
+    const report: SweepReport = result.data
+    setSweepResult(
+      `policy ${report.policy}: evaluated ${report.evaluated_nodes} nodes / ${report.evaluated_edges} edges · faded ${report.faded_nodes} · depressed ${report.depressed_edges} · deleted ${report.pruned_nodes} · protected ${report.protected_nodes}`
+    )
+    void refresh()
+  }
+
+  const offline = (
+    <div className="state-card">
+      <h3>{state === 'denied' ? 'The core is asking for a key' : 'No core is connected'}</h3>
+      <p>{message || 'The dashboard reads a local CORTEX core through /api/core. Nothing here is simulated — when the core is missing you see this instead of numbers.'}</p>
+      {state === 'denied' ? (
+        <p>
+          Set <code>CORTEX_API_KEY</code> in this site&apos;s environment to the same value the core was started with, then reload.
+        </p>
+      ) : (
+        <div className="row">
+          <code>cd cortex-core &amp;&amp; cargo run --release --bin cortex-core</code>
+        </div>
+      )}
+      <div className="row">
+        <button type="button" className="button small" onClick={() => void refresh()} disabled={isRefreshing}>
+          <RotateCw size={14} /> {isRefreshing ? 'Retrying…' : 'Retry now'}
+        </button>
+        <Link href="/dashboard/docs" className="button small ghost">
+          Setup docs
+        </Link>
+      </div>
+    </div>
+  )
 
   return (
-    <div className="dash-content wrap" style={{ paddingTop: '60px', paddingBottom: '60px' }}>
-      {/* Header */}
-      <header style={{ marginBottom: '60px' }}>
-        <p className="eyebrow" style={{ color: 'var(--accent)' }}>COMMAND CENTER / 01</p>
-        <h1 style={{ fontSize: 'clamp(42px,5vw,70px)', margin: '0 0 10px', fontWeight: 800, letterSpacing: '-.06em', lineHeight: .98 }}>
+    <div className="wrap" style={{ paddingTop: 60, paddingBottom: 60 }}>
+      <header style={{ marginBottom: 44 }}>
+        <p className="eyebrow" style={{ color: 'var(--accent)' }}>
+          COMMAND CENTER / 01
+        </p>
+        <h1 style={{ fontSize: 'clamp(42px,5vw,70px)', margin: '0 0 10px', fontWeight: 800, letterSpacing: '-.06em', lineHeight: 0.98 }}>
           Watch the brain <em>work.</em>
         </h1>
-        <p className="lead" style={{ maxWidth: '600px', margin: '20px 0 30px' }}>
-          This isn&apos;t a stupid dashboard. This is the live synaptic feed of your AI.
+        <p className="lead" style={{ maxWidth: 600, margin: '20px 0 30px' }}>
+          Every number below is read from your core — the same graph your MCP and extension write to. No sample data, no
+          screenshots of a hypothetical.
         </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <span style={{ 
-            font: '11px monospace', color: isConnected ? '#22c55e' : '#ef4444', 
-            display: 'flex', alignItems: 'center', gap: '8px',
-            border: `1px solid ${isConnected ? '#22c55e30' : '#ef444430'}`, padding: '6px 12px', borderRadius: '4px'
-          }}>
-            <span style={{ display: 'block', width: 6, height: 6, borderRadius: '50%', background: isConnected ? '#22c55e' : '#ef4444' }} />
-            {isConnected ? 'CORTEX CORE ONLINE' : 'OFFLINE (RUN cargo run)'}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 15, flexWrap: 'wrap' }}>
+          <StatusPill state={state} message={message} />
+          {lastUpdated ? (
+            <span className="mono" style={{ color: 'var(--secondary)' }}>
+              {liveUpdates ? 'live socket + ' : 'polling every 20s · '}updated {timeAgo(lastUpdated)}
+            </span>
+          ) : null}
           <Link href="/dashboard/brain" className="button small">
             Enter 3D Mind <ArrowRight size={14} />
           </Link>
         </div>
       </header>
 
-      {/* Stats Grid - using pain-grid styles */}
-      <div className="pain-grid" style={{ marginTop: '0', marginBottom: '70px', gridTemplateColumns: 'repeat(4, 1fr)' }}>
-        {[
-          ['01', 'Neurons', '9', '7 local • 2 mesh'],
-          ['02', 'Synaptic Links', '7', '5 active • 2 historical'],
-          ['03', 'Ebbinghaus', '74.2%', 'R = e^(-Δt/S)'],
-          ['04', 'Amygdala Locks', '4', 'Zero decay. These are law.'],
-        ].map(([n, t, v, d]) => (
-          <article key={n} className="pain-card" style={{ minHeight: 'auto', padding: '24px' }}>
-            <span className="card-num">{n}</span>
-            <div style={{ marginTop: '30px' }}>
-              <p className="mono" style={{ margin: '0 0 10px' }}>{t.toUpperCase()}</p>
-              <strong style={{ display: 'block', fontSize: '48px', fontWeight: 400, color: 'var(--accent)', margin: '0 0 10px', lineHeight: 1 }}>{v}</strong>
-              <p style={{ margin: 0, fontSize: '12px', color: 'var(--secondary)' }}>{d}</p>
-            </div>
-          </article>
-        ))}
+      {state === 'offline' || state === 'denied' || state === 'error' ? (
+        <div style={{ marginBottom: 40 }}>{offline}</div>
+      ) : null}
+
+      {state === 'empty' ? (
+        <div className="state-card" style={{ marginBottom: 40 }}>
+          <h3>Connected, and empty — which is correct for a new install</h3>
+          <p>
+            Your core is running and writable, with no memories yet. Store one below and it will appear here, in the 3D
+            view, and in every MCP client immediately.
+          </p>
+          <p style={{ color: 'var(--secondary)', fontSize: 13 }}>
+            Backend <code>{health?.backend ?? '—'}</code> · decay policy <code>{health?.decay_policy ?? '—'}</code> ·
+            extraction <code>{health?.services?.extraction ? 'LLM (OpenRouter)' : 'offline heuristics'}</code>
+          </p>
+        </div>
+      ) : null}
+
+      <div className="pain-grid" style={{ marginTop: 0, marginBottom: 60, gridTemplateColumns: 'repeat(4, 1fr)' }}>
+        <Kpi
+          n="01"
+          title="Memories"
+          value={stats ? String(stats.nodes) : '—'}
+          pending={!stats}
+          note={stats ? `${health?.counts.nodes ?? stats.nodes} nodes · ${health?.counts.buffered_sessions ?? 0} session(s) buffering` : 'no core'}
+        />
+        <Kpi
+          n="02"
+          title="Relations"
+          value={stats ? String(stats.edges) : '—'}
+          pending={!stats}
+          note={stats ? `${stats.historical} historical after corrections` : 'no core'}
+        />
+        <Kpi
+          n="03"
+          title="Avg retention"
+          value={stats ? `${(stats.avg_retention * 100).toFixed(1)}%` : '—'}
+          pending={!stats}
+          note={stats ? `R = e^(-Δt/S) · ${stats.fading} fading under policy ${stats.decay_policy}` : 'no core'}
+        />
+        <Kpi
+          n="04"
+          title="Amygdala locks"
+          value={stats ? String(stats.locked) : '—'}
+          pending={!stats}
+          note={stats ? 'exempt from decay by construction' : 'no core'}
+        />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '30px' }}>
-        
-        {/* Left Column: Visuals & Live Feed */}
-        <div>
-          <div style={{ border: '1px solid var(--border)', background: 'var(--surface)', padding: '30px', marginBottom: '30px' }}>
-            <div className="box-top" style={{ marginBottom: '30px' }}>
-              <span>LIVE HIVE MIND GRAPH</span>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 400px', gap: 30 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ border: '1px solid var(--border)', background: 'var(--surface)', padding: 30, marginBottom: 30 }}>
+            <div className="box-top" style={{ marginBottom: 24 }}>
+              <span>MEMORY GRAPH</span>
               <span style={{ color: 'var(--accent)' }}>●</span>
             </div>
-            <Graph active={6} isLive={true} />
-            <div className="visual-caption" style={{ marginTop: '30px' }}>
-              <span>status</span>
-              <strong>ACTIVE</strong>
-              <small>Processing memories...</small>
+            {state === 'loading' ? (
+              <div style={{ display: 'grid', gap: 12, padding: '40px 0' }}>
+                <SkeletonBlock height={90} />
+                <SkeletonBlock height={12} width="60%" />
+              </div>
+            ) : (
+              <Graph active={stats?.nodes ?? 0} total={stats?.nodes ?? 0} mesh={Boolean(health?.services?.graph && (stats?.nodes ?? 0) > 4)} />
+            )}
+            <div className="visual-caption" style={{ marginTop: 24 }}>
+              <span>whole graph costs</span>
+              <strong>{stats ? `${stats.full_graph_token_estimate} tk` : '—'}</strong>
+              <small>
+                {stats
+                  ? `why budgeting matters: recall packs a ${stats.nodes}-node graph into one bounded block`
+                  : 'no core'}
+              </small>
             </div>
           </div>
 
           <div style={{ border: '1px solid var(--border)', background: 'var(--surface)' }}>
             <div className="box-top" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)' }}>
-              <span>REAL-TIME SYNAPTIC LOG</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#22c55e' }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', animation: 'node-pulse 2s infinite' }} /> LIVE
+              <span>RECENTLY REMEMBERED</span>
+              <span className="mono" style={{ color: 'var(--secondary)' }}>
+                {liveUpdates ? 'LIVE' : 'POLLED'}
               </span>
             </div>
-            <div style={{ padding: '10px 24px 24px', maxHeight: '400px', overflowY: 'auto' }}>
-              {logs.map(log => (
-                <div key={log.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', padding: '14px 0', borderBottom: '1px solid var(--border)' }}>
-                  <span className="mono" style={{ fontSize: '10px', color: 'var(--secondary)', minWidth: '60px' }}>{log.time}</span>
-                  <span className="mono" style={{ 
-                    fontSize: '10px', padding: '3px 8px', borderRadius: '4px',
-                    color: log.type === 'ingest' ? 'var(--accent)' : log.type === 'recall' ? '#06b6d4' : 'var(--secondary)',
-                    border: `1px solid ${log.type === 'ingest' ? 'var(--accent)' : log.type === 'recall' ? '#06b6d4' : 'var(--border)'}`,
-                    opacity: 0.8
-                  }}>{log.source.toUpperCase()}</span>
-                  <span style={{ fontSize: '13px', color: 'var(--foreground)', flex: 1, fontFamily: 'monospace' }}>{log.text}</span>
+            <div style={{ padding: '10px 24px 24px', maxHeight: 420, overflowY: 'auto' }}>
+              {state === 'loading' ? (
+                <div style={{ display: 'grid', gap: 14, padding: '18px 0' }}>
+                  {[0, 1, 2, 3].map((i) => (
+                    <SkeletonBlock key={i} height={16} />
+                  ))}
                 </div>
-              ))}
+              ) : feed.length === 0 ? (
+                <p className="kpi-note" style={{ padding: '18px 0' }}>
+                  Nothing stored yet. Use BURN MEMORY, the MCP <code>cortex_remember</code> tool, or the browser extension.
+                </p>
+              ) : (
+                feed.map((entry) => (
+                  <div key={entry.id} className="feed-row">
+                    <span className="when">{timeAgo(entry.when)}</span>
+                    <span className={`tag ${entry.kind}`}>{entry.source.toUpperCase().slice(0, 11)}</span>
+                    <span className="body">{entry.text}</span>
+                    <span className="when">{entry.kind === 'decay' ? 'fading' : 'stored'}</span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
 
-        {/* Right Column: Interaction */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          
-          {/* Burn Memory */}
-          <form onSubmit={handleInject} style={{ border: '1px solid var(--border)', background: 'var(--surface)', padding: '24px' }}>
-            <div className="box-top" style={{ marginBottom: '20px' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Flame size={14} /> BURN MEMORY</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <form onSubmit={handleInject} style={{ border: '1px solid var(--border)', background: 'var(--surface)', padding: 24 }}>
+            <div className="box-top" style={{ marginBottom: 16 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Flame size={14} /> BURN MEMORY
+              </span>
+              {!canWrite ? <span className="mono">disabled</span> : null}
             </div>
-            <p style={{ margin: '0 0 16px', fontSize: '13px', color: 'var(--secondary)' }}>Type a rule. We&apos;ll permanently sear it into your AI&apos;s brain.</p>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--secondary)' }}>
+              One atomic fact or rule. The extractor — your LLM if configured, heuristics otherwise — decides what
+              becomes a graph edge.
+            </p>
             <textarea
+              className="field"
               rows={4}
               value={injectText}
-              onChange={e => setInjectText(e.target.value)}
-              placeholder="e.g. 'Always use SurrealDB...'"
-              style={{ width: '100%', padding: '14px', border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--foreground)', font: '13px monospace', resize: 'none', outline: 'none' }}
-              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-              onBlur={e => e.target.style.borderColor = 'var(--border)'}
+              onChange={(e) => setInjectText(e.target.value)}
+              placeholder={"e.g. never hand-write SQL; every query goes through the typed query builder"}
+              disabled={!canWrite}
             />
-            <button type="submit" className="button small" disabled={isInjecting || !injectText.trim()} style={{ width: '100%', marginTop: '16px' }}>
-              {isInjecting ? 'Burning...' : 'Inject into Hive Mind'}
+            <button type="submit" className="button small" disabled={!canWrite || isInjecting || !injectText.trim()} style={{ width: '100%', marginTop: 16 }}>
+              {isInjecting ? 'Extracting…' : 'Remember this'}
             </button>
+            {injectResult ? <div className={`result-box${injectResult.ok ? '' : ' err'}`}>{injectResult.text}</div> : null}
           </form>
 
-          {/* Recall Memory */}
-          <form onSubmit={handleRecall} style={{ border: '1px solid var(--border)', background: 'var(--surface)', padding: '24px' }}>
-            <div className="box-top" style={{ marginBottom: '20px' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Search size={14} /> RECALL TEST</span>
+          <form onSubmit={handleRecall} style={{ border: '1px solid var(--border)', background: 'var(--surface)', padding: 24 }}>
+            <div className="box-top" style={{ marginBottom: 16 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Search size={14} /> RECALL TEST
+              </span>
+              <Activity size={14} style={{ color: 'var(--secondary)' }} />
             </div>
-            <p style={{ margin: '0 0 16px', fontSize: '13px', color: 'var(--secondary)' }}>Test the retention. See if the brain actually works.</p>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--secondary)' }}>
+              Ask the graph a question and see exactly what a model would be given, including why each memory matched.
+            </p>
             <input
+              className="field"
               type="text"
               value={recallPrompt}
-              onChange={e => setRecallPrompt(e.target.value)}
-              placeholder="e.g. 'What DB do we use?'"
-              style={{ width: '100%', padding: '14px', border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--foreground)', font: '13px monospace', outline: 'none' }}
-              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-              onBlur={e => e.target.style.borderColor = 'var(--border)'}
+              onChange={(e) => setRecallPrompt(e.target.value)}
+              placeholder="which database do we use?"
+              disabled={!canWrite}
             />
-            {recallResult && (
-              <div style={{ marginTop: '16px', padding: '16px', border: '1px solid var(--border)', background: 'var(--background)' }}>
-                <div className="mono" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '8px' }}>SYSTEM CORTEX CONTEXT:</div>
-                <p style={{ margin: 0, fontSize: '12px', fontFamily: 'monospace', color: 'var(--foreground)', lineHeight: 1.5 }}>{recallResult}</p>
-              </div>
-            )}
-            <button type="submit" className="button small ghost" disabled={isRecalling || !recallPrompt.trim()} style={{ width: '100%', marginTop: '16px' }}>
-              {isRecalling ? 'Recalling...' : 'Test Memory Retrieval'}
+            <button type="submit" className="button small ghost" disabled={!canWrite || isRecalling || !recallPrompt.trim()} style={{ width: '100%', marginTop: 16 }}>
+              {isRecalling ? 'Searching…' : 'Run recall'}
             </button>
+            {recallResult ? (
+              <div className={`result-box${recallResult.ok ? '' : ' err'}`}>
+                {recallResult.meta ? <div style={{ opacity: 0.75, marginBottom: 8 }}>{recallResult.meta}</div> : null}
+                {recallResult.text}
+              </div>
+            ) : null}
           </form>
 
+          <div style={{ border: '1px solid var(--border)', background: 'var(--surface)', padding: 24 }}>
+            <div className="box-top" style={{ marginBottom: 16 }}>
+              <span>FORGETTING</span>
+              <span className="mono">{stats?.decay_policy ?? '—'}</span>
+            </div>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--secondary)' }}>
+              Sweep now: recomputes retention and fades what fell below threshold. Under the default <code>soft</code>{' '}
+              policy nothing is deleted; deletion requires starting the core with <code>CORTEX_DECAY_POLICY=prune</code>.
+            </p>
+            <button type="button" className="button small ghost" onClick={() => void handleSweep()} disabled={!canWrite || isSweeping} style={{ width: '100%' }}>
+              {isSweeping ? 'Sweeping…' : 'Run decay sweep'}
+            </button>
+            {sweepResult ? <div className="result-box">{sweepResult}</div> : null}
+          </div>
         </div>
       </div>
     </div>

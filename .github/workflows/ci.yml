@@ -1,0 +1,374 @@
+name: CI
+
+# Every job here runs a suite that exists in this repo. Nothing is aspirational:
+# if a job is green, that claim in the README is true.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── The engine ──────────────────────────────────────────────────────────────
+  core:
+    # Requested so a failing Rust job can publish its own diagnostics (see
+    # .github/scripts/publish-diagnostics.sh). If the repository pins workflow tokens to
+    # read-only these calls fail, and the step says so in a warning annotation.
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    name: cortex-core (fmt · clippy · test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: cortex-core
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub's ubuntu-latest ships a stable Rust toolchain; we only add the
+      # components, so there is no third-party action to trust here.
+      - name: Toolchain
+        run: |
+          rustup component add rustfmt clippy
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cortex-core/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('cortex-core/Cargo.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # The repo deliberately does not commit cortex-core/Cargo.lock (the last
+      # one pinned axum 0.6 while the manifest asked for 0.7, which only bites
+      # when someone builds --locked). CI resolves and commits nothing.
+      - name: Resolve dependencies
+        run: cargo generate-lockfile
+
+      # cargo fmt has never run in the authoring environment, so the first pass is expected to
+      # show diffs. It stays non-fatal until one run is clean, but the diff is still reported:
+      # `cargo fmt --check` prints exactly what to apply, so the formatting can be fixed by hand
+      # without a toolchain. Flip continue-on-error to false once it passes here.
+      - name: Format
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo fmt --all --check 2>&1 | tee /tmp/fmt.log
+
+      - name: Clippy
+        # `short` keeps one line per diagnostic, which survives the trip into an annotation.
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo clippy --all-targets --message-format short -- -D warnings 2>&1 | tee /tmp/clippy.log
+
+      - name: Test
+        run: |
+          set -o pipefail
+          cargo test --all-targets --message-format short 2>&1 | tee /tmp/test.log
+          status=${PIPESTATUS[0]}
+          # Echo the failing test names from the step that still owns the log, so a red run is
+          # readable even if the cross-step reporter never fires (it depends on /tmp surviving
+          # between steps, on `if: always()`, and on a script that must never become the outage).
+          if [ "$status" -ne 0 ]; then
+            sed -e 's/\x1b\[[0-9;]*m//g' /tmp/test.log \
+              | grep -E "test result:|panicked at|FAILED|^failures:|^    [a-z_:]+$" \
+              | head -25 \
+              | sed -e 's/%/%25/g' -e 's/::/%3A%3A/g' \
+              | while IFS= read -r line; do echo "::error title=failing test::${line:0:400}"; done
+          fi
+          exit "$status"
+
+      - name: Report cargo diagnostics
+        # Actions log *files* are served from hosts this environment cannot reach (results-receiver
+        # + Azure blob both die with a TLS EOF), so the diagnostics are pushed back through
+        # api.github.com instead: annotations, a check run on the commit, and a PR comment as
+        # fallback. Paths are absolute because this job sets `working-directory: cortex-core` — the
+        # first version used a relative path, exited 127, and hid the real failure behind a broken
+        # reporter. continue-on-error so this step can never *become* the outage it explains.
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          bash "$GITHUB_WORKSPACE/.github/scripts/report-cargo.sh" \
+            /tmp/fmt.log /tmp/clippy.log /tmp/test.log /tmp/build.log
+          bash "$GITHUB_WORKSPACE/.github/scripts/publish-diagnostics.sh" "cortex-core" \
+            /tmp/fmt.log /tmp/clippy.log /tmp/test.log /tmp/build.log
+
+      - name: Build (release, single binary)
+        # This is the artifact the installers ship, so its output is captured like the rest:
+        # a release-only failure (linker flags, a cfg that only bites in --release) has to be
+        # readable without downloading the Actions log.
+        run: |
+          set -o pipefail
+          cargo build --release --bin cortex-core --message-format short 2>&1 | tee /tmp/build.log
+
+      # End-to-end against the *release binary*: no test doubles, no source
+      # imports. If this passes, a stranger's `cargo run` works.
+      - name: Smoke the binary
+        run: |
+          set -euo pipefail
+          ./target/release/cortex-core > /tmp/core.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3030/health >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:3030/health -o /tmp/health.json
+          jq -e '.status == "ok"' /tmp/health.json > /dev/null
+          jq -e '.backend == "file"' /tmp/health.json > /dev/null
+          # The health endpoint must not advertise capabilities that do not exist.
+          jq -e '.services.cloud_sync == false' /tmp/health.json > /dev/null
+          jq -e '.services.extraction == false' /tmp/health.json > /dev/null
+
+          curl -fsS -X POST http://127.0.0.1:3030/v1/ingest -H 'content-type: application/json' \
+            -d '{"owner":"ci@local","user_id":"ci","wait":true,"prompt":"USER: I always use pnpm in CI. USER: I prefer Rust for backend services"}' \
+            -o /tmp/ingest.json
+          jq -e '.job_id' /tmp/ingest.json > /dev/null
+          state=$(curl -fsS "http://127.0.0.1:3030/v1/jobs/$(jq -r .job_id /tmp/ingest.json)" | jq -r '.state')
+          test "$state" = "done" || { echo "job state was $state"; cat /tmp/core.log; exit 1; }
+
+          curl -fsS -X POST http://127.0.0.1:3030/v1/recall -H 'content-type: application/json' \
+            -d '{"owner":"ci@local","prompt":"package manager","token_budget":600}' -o /tmp/recall.json
+          # The token budget is the headline claim, so CI enforces it against the
+          # live binary instead of trusting the unit tests: the briefing must fit
+          # the budget it was given, and a 32-token budget must actually truncate.
+          jq -e '(.briefing | type) == "string"' /tmp/recall.json > /dev/null
+          jq -e '.tokens_used <= .token_budget' /tmp/recall.json > /dev/null
+          curl -fsS -X POST http://127.0.0.1:3030/v1/recall -H 'content-type: application/json' \
+            -d '{"owner":"ci@local","prompt":"package manager","token_budget":32}' -o /tmp/recall-tight.json
+          jq -e '.tokens_used <= 32 and .truncated == true' /tmp/recall-tight.json > /dev/null
+          curl -fsS 'http://127.0.0.1:3030/v1/memories?owner=ci@local&limit=10' -o /tmp/memories.json
+          jq -e 'has("memories") or type == "array"' /tmp/memories.json > /dev/null
+          # Mesh publishing must be an explicit 501, never a silent no-op.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3030/v1/mesh/publish \
+            -H 'content-type: application/json' -d '{"nodes":[],"edges":[]}')
+          test "$code" = "501" || { echo "expected 501 from mesh publish, got $code"; exit 1; }
+
+          kill $pid; wait $pid 2>/dev/null || true
+          grep -q "flushed pending sessions\|shutdown" /tmp/core.log || echo "note: no shutdown log line"
+
+      - name: Auth gate (a key must actually gate)
+        run: |
+          set -euo pipefail
+          CORTEX_API_KEY=ci-secret-key CORTEX_PORT=3031 ./target/release/cortex-core > /tmp/core-auth.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3031/health >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          # /health stays open; data routes do not.
+          curl -fsS http://127.0.0.1:3031/health > /dev/null
+          code=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3031/v1/memories?owner=ci@local)
+          test "$code" = "401" || { echo "no-key request returned $code, expected 401"; cat /tmp/core-auth.log; exit 1; }
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'authorization: Bearer wrong-key' http://127.0.0.1:3031/v1/memories?owner=ci@local)
+          test "$code" = "401" || { echo "wrong key returned $code, expected 401"; exit 1; }
+          curl -fsS -H 'authorization: Bearer ci-secret-key' 'http://127.0.0.1:3031/v1/memories?owner=ci@local' > /dev/null
+          kill $pid; wait $pid 2>/dev/null || true
+
+      - name: Publish the core runtime log on failure
+        # A smoke-test failure is a runtime bug, not a compile error, and the binary's stdout is
+        # the only place it says why it refused to start.
+        if: failure()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          for f in /tmp/core.log /tmp/core-auth.log /tmp/health.json /tmp/recall.json; do
+            [ -s "$f" ] && { echo "--- $f"; tail -40 "$f"; } >> /tmp/core-run.log || true
+          done
+          bash "$GITHUB_WORKSPACE/.github/scripts/publish-diagnostics.sh" "cortex-core runtime" \
+            /tmp/core-run.log
+
+  # ── The MCP server users actually install ──────────────────────────────────
+  mcp:
+    name: cortex-mcp (stdio smoke)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ["20", "22"]
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cortex-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: cortex-mcp/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      # node --check + 28 assertions driven over a real JSON-RPC stdio session
+      - run: npm test
+
+  # ── Browser extension ──────────────────────────────────────────────────────
+  extension:
+    name: cortex-extension (harvest logic + manifest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cortex-extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm test # no dependencies: syntax checks + logic tests + manifest audit
+
+  # ── SDKs ───────────────────────────────────────────────────────────────────
+  sdk-js:
+    name: cortex-js (build + contract tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cortex-js
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: cortex-js/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      # `verify` = typecheck + contract tests + tsup/tsc build + dist audit
+      # (both module formats expose Cortex/Client/CortexError, .d.ts present,
+      # exports map points at files that exist).
+      - run: npm run verify
+
+  sdk-py:
+    name: cortex-py (stdlib client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cortex-py
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s tests -t . -v
+
+  # ── The web app ────────────────────────────────────────────────────────────
+  frontend:
+    name: cortex-frontend (types + tests + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cortex-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: cortex-frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run verify # tsc --noEmit, hydrate tests, next build
+
+  # ── The one script that can damage a user's machine ────────────────────────
+  installer:
+    name: setup scripts (config merge safety)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Merging, backups, refusal on broken JSON, idempotency, --remove, --dry-run.
+      - run: node scripts/test-setup-merge.mjs
+
+  hygiene:
+    name: repo hygiene (versions agree, manifests parse)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Ten manifests carry a version. Without this check they drift within a week.
+      - run: node scripts/check-versions.mjs
+      # Committed node_modules is how this repo produced a 3,600-file diff by accident: .gitignore
+      # does not apply to paths git already tracks, so the only defence is a check on git ls-files.
+      - run: node scripts/check-no-vendored.mjs
+
+  desktop:
+    # Requested so a failing Rust job can publish its own diagnostics (see
+    # .github/scripts/publish-diagnostics.sh). If the repository pins workflow tokens to
+    # read-only these calls fail, and the step says so in a warning annotation.
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    name: cortex-desktop (tauri config + cargo check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: cortex-desktop/package-lock.json
+      - name: System libs for the Tauri build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libssl-dev libgtk-3-dev
+      - run: cd cortex-desktop && npm ci --no-audit --no-fund
+      - name: Validate tauri.conf.json
+        # A tracked script, not an inline `node -e`: the inline version passed a config with
+        # `security` at the root (wrong place; the build script rejected it) because a validator
+        # you cannot run locally and cannot test against a bad fixture only checks what it remembers.
+        run: node cortex-desktop/scripts/validate-tauri-config.mjs
+      # A full bundle needs Apple/Windows signing we deliberately do not fake in
+      # CI, so the gate is the Rust type-check plus the config audit above.
+      - name: cargo check
+        working-directory: cortex-desktop/src-tauri
+        run: |
+          set -o pipefail
+          cargo check --all-targets --message-format short 2>&1 | tee /tmp/check.log
+
+      - name: Report cargo diagnostics
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          bash "$GITHUB_WORKSPACE/.github/scripts/report-cargo.sh" /tmp/check.log
+          bash "$GITHUB_WORKSPACE/.github/scripts/publish-diagnostics.sh" "cortex-desktop" /tmp/check.log
+          cargo check --all-targets 2>&1 | grep -q "^error" && exit 1 || true

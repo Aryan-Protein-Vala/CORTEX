@@ -67,6 +67,9 @@ fn test_overwrite_engine_conflict_resolution() {
         confidence: 0.98,
         impact: 9,
         overwrite: true,
+        // Set explicitly rather than ..Default::default(): this crate treats a triplet's natural
+        // language rendering as provenance, and a test should not inherit it by accident.
+        sentence: String::new(),
     };
 
     let result = overwrite.apply_overwrite(
@@ -89,18 +92,24 @@ fn test_overwrite_engine_conflict_resolution() {
 #[test]
 fn test_context_packet_serialization() {
     let node = MemoryNode::new("SurrealDB");
-    let packet = CortexContextPacket {
-        user_id: "test_user".to_string(),
-        nodes: vec![node],
-        edges: vec![],
-        rules: vec![],
-        token_estimate: 500,
-        context: "SurrealDB memory graph context".to_string(),
-    };
+    // Built through CortexContextPacket::empty instead of a struct literal: the literal broke the
+    // moment the packet grew a field (it did: briefing / generated_at / memories_found /
+    // truncated), and it silently skipped the defaults the real constructor applies.
+    let mut packet = CortexContextPacket::empty("test_user", 500);
+    packet.nodes = vec![node];
+    packet.memories_found = 1;
+    packet.briefing = "SurrealDB memory graph context".to_string();
 
     let json = serde_json::to_string(&packet).expect("Failed to serialize");
     assert!(json.contains("SurrealDB"));
     assert!(json.contains("test_user"));
+    // The MCP and both SDKs re-parse this shape, so serialization is only half the contract.
+    let back: CortexContextPacket = serde_json::from_str(&json).expect("round trip");
+    assert_eq!(back.user_id, packet.user_id);
+    assert_eq!(back.token_budget, 500);
+    assert_eq!(back.memories_found, 1);
+    assert_eq!(back.context, "https://cortex.dev/ns/memory@2");
+    assert!(back.generated_at.is_some(), "a packet without a timestamp cannot be decayed");
 }
 
 #[test]
@@ -166,59 +175,49 @@ fn test_semantic_embedding_subword_stems() {
 
 #[test]
 fn test_briefing_label_resolution() {
-    // Tests §1.5 from Launch Audit: Briefings must format node labels, not raw node:UUID strings
-    let node_user = MemoryNode::new("Aryan");
-    let node_db = MemoryNode::new("PostgreSQL");
+    // Launch Audit 1.5: a briefing must read "Aryan -> [prefers] -> PostgreSQL", never
+    // "node:9f3c...". Rewritten from a duplicate that built its own label map inside the
+    // test and asserted on that — it stayed green while the crate could have been broken.
+    let user = MemoryNode::new("Aryan");
+    let db = MemoryNode::new("PostgreSQL");
+    let edge = RelationalEdge::new(&user.id, "prefers", &db.id, 0.95);
 
-    let edge = RelationalEdge::new(&node_user.id, "prefers", &node_db.id, 0.95);
+    let (briefing, tokens_used, truncated) =
+        cortex_core::engine::recall::render_briefing(&[user, db], &[edge], 500);
 
-    let retrieved_nodes = vec![node_user.clone(), node_db.clone()];
-    let retrieved_edges = vec![edge.clone()];
-
-    let label_map: std::collections::HashMap<&str, &str> = retrieved_nodes
-        .iter()
-        .flat_map(|n| {
-            let clean = n.id.trim_start_matches("node:");
-            vec![(n.id.as_str(), n.label.as_str()), (clean, n.label.as_str())]
-        })
-        .collect();
-
-    let mut parts = Vec::new();
-    for e in &retrieved_edges {
-        let s_clean = e.source.trim_start_matches("node:");
-        let t_clean = e.target.trim_start_matches("node:");
-        let s_label = label_map.get(e.source.as_str())
-            .or_else(|| label_map.get(s_clean))
-            .copied()
-            .unwrap_or(e.source.as_str());
-        let t_label = label_map.get(e.target.as_str())
-            .or_else(|| label_map.get(t_clean))
-            .copied()
-            .unwrap_or(e.target.as_str());
-
-        parts.push(format!("Fact: {} -> [{}] -> {}", s_label, e.predicate, t_label));
-    }
-
-    let summary = parts.join("\n");
-    assert!(summary.contains("Fact: Aryan -> [prefers] -> PostgreSQL"));
-    assert!(!summary.contains("node:"));
+    assert!(
+        briefing.contains("Aryan -> [prefers] -> PostgreSQL"),
+        "labels did not reach the briefing: {briefing}"
+    );
+    assert!(!briefing.contains("node:"), "raw node ids leaked into the briefing: {briefing}");
+    assert!(tokens_used > 0, "tokens_used must be reported, not left at zero");
+    assert!(!truncated, "two nodes and one fact fit in 500 tokens");
 }
 
 #[test]
 fn test_token_budget_truncation() {
-    // Tests §1.4 from Launch Audit: Context must be bounded to token_budget
-    let long_text = "This is a repeated context string to test token bounds. ".repeat(100);
-    let budget_tokens = 50usize;
-    let char_budget = budget_tokens * 4;
+    // Launch Audit 1.4: the token budget the MCP advertises has to be a ceiling the *core*
+    // enforces. Calls render_briefing directly; the version this replaced truncated the
+    // string inside the test body and asserted on its own work.
+    let nodes: Vec<MemoryNode> = (0..400)
+        .map(|i| {
+            MemoryNode::new(format!(
+                "memory {i} with a deliberately long label so the ceiling has to bite"
+            ))
+        })
+        .collect();
 
-    let bounded = if long_text.len() > char_budget {
-        format!("{}... [bounded to {} tokens]", &long_text[..char_budget], budget_tokens)
-    } else {
-        long_text.clone()
-    };
+    let (briefing, tokens_used, truncated) =
+        cortex_core::engine::recall::render_briefing(&nodes, &[], 60);
 
-    assert!(bounded.contains("[bounded to 50 tokens]"));
-    assert!(bounded.len() < long_text.len());
+    assert!(truncated, "400 long labels cannot fit in 60 tokens");
+    assert!(tokens_used <= 60, "budget ignored: emitted {tokens_used} tokens of 60");
+    // render_briefing trims the trailing newline off the string it returns but counts
+    // tokens on the untrimmed buffer, so the two estimates may differ by one token.
+    let emitted = cortex_core::types::estimate_tokens(&briefing);
+    assert!(
+        (tokens_used as i64 - emitted as i64).abs() <= 1,
+        "tokens_used ({tokens_used}) must account for the text actually emitted ({emitted})"
+    );
+    assert!(!briefing.is_empty(), "truncation must keep what fits, not drop the packet");
 }
-
-
