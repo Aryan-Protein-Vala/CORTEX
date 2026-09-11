@@ -251,3 +251,57 @@ on the untrimmed buffer and returns the trimmed string, so `tokens_used` may exc
 
 Relative to the branch tip, the merge changed three files. The parallel implementation and mine
 converged on the same diagnosis — the branch was already ahead on wiring, not on ideas.
+
+## Fourth pass: the first real CI run, and the four things it caught that I could not
+
+Actions started producing runs on the merge commit (`7f4b95d`) — 13 jobs, 8 passed, 5 failed.
+The log *files* are unreachable from this sandbox (`results-receiver.actions.githubusercontent.com`
+and the Azure blob host both die with EOF), so everything below came from job/step metadata and
+annotations plus local reasoning about the exit codes.
+
+| Job | Result | Cause |
+| --- | --- | --- |
+| `cortex-core (fmt · clippy · test)` | fail, exit 101 at **Resolve dependencies** | `tower = "0.7"` in `[dev-dependencies]`. **tower never released 0.7** — I invented the number. `cargo generate-lockfile` died before compiling anything. Now pinned `0.4`, which is what axum 0.7 and tower-http 0.5 depend on, so `ServiceExt::oneshot` shares one `tower-service` 0.3 trait with the router under test. |
+| `cortex-js (build + contract tests)` | fail, exit 9 | `npm run verify` calls `node --experimental-strip-types`, which does not exist on **Node 20** — the version CI installed, while my shell has 22.22.3. The tests passed locally *only* because of that difference: a genuine false green I had reported as verified. |
+| `cortex-frontend (types + tests + build)` | fail, exit 9 | same flag, same reason. |
+| `cortex-desktop (tauri config + cargo check)` | fail, exit 1 at "Validate tauri.conf.json" | the config had **no `security` key at all**, so the one-line validator threw `TypeError: Cannot read properties of undefined` — it never got to say what was wrong. Two fixes: a real CSP, and a validator that names the failing rule. |
+| `Vercel` | fail in 0s | project Root Directory still points at the repo root; not a repo bug (see the README deploy note). |
+
+What the run *did* prove, on GitHub's own hardware: `cortex-mcp` stdio smoke on
+ubuntu-20 / ubuntu-22 / macos-20 / macos-22, `cortex-extension` manifest audit + harvest logic,
+`setup-cursor-mcp.sh` merge safety on ubuntu + macos, `cortex-py` on 3.9 and 3.12, and repo
+hygiene (14 manifests agreeing on `0.1.0`). Those eight jobs are the first machine-verified
+evidence this project has had.
+
+Fixes applied, each re-checked locally:
+
+- `tower = "0.4"` with a comment saying why, because the failure mode was a version that does not exist.
+- `security.csp` in `cortex-desktop/src-tauri/tauri.conf.json`:
+  `default-src 'self'; script-src 'self'; style-src 'self'; … connect-src 'self' ipc:
+  http://ipc.localhost http://127.0.0.1:3030 ws://127.0.0.1:3030; object-src 'none'`.
+  Chosen to be enforceable rather than decorative: `cortex-desktop/src/index.html` loads exactly
+  one external module and has no inline script or style attribute, so `script-src 'self'` and
+  `style-src 'self'` can stay strict. `connect-src` must keep the core's origin or the desktop
+  app cannot talk to itself.
+- The desktop validator is now a literal block that reports the failing rule. Executed both ways
+  locally: exit 0 on the real config, exit 1 with a sentence on a config with `security` deleted.
+- CI installs Node 22 for `sdk-js` and `frontend`. The `test` scripts in both packages now check
+  the runtime first and print what to do instead of dying with node's "bad option" exit 9.
+- `scripts/verify-all.mjs` gained `needsNode: "22.6"` for those two suites, so a contributor on
+  Node 20 sees `skip (Node 20.x < 22.6)` rather than a failure that looks like a broken checkout.
+
+Things this run still does not tell us, stated plainly:
+
+- `cargo fmt` and `cargo clippy` are `continue-on-error: true`, so style drift and lints will not
+  fail the build yet. They get flipped once one run is clean on both.
+- The desktop job died at its Node step, so **the desktop crate's dependency pins have never been
+  resolved by cargo either** — the `tower` class of bug may well be sitting there. Same for
+  `cargo check` on the Tauri Rust side.
+- The core smoke test asserts only on `/health` fields; the release build itself is the real risk
+  (surrealdb is a non-optional dependency, so the build is long — that is a launch cost worth
+  revisiting, not a correctness question).
+- One honest consequence for my earlier reporting: the verification table in this file claimed
+  the JS SDK and frontend suites were "green". They were green **on my runtime**, and CI on a
+  supported LTS proved the scripts are not portable. Anything in this ledger that says "verified"
+  for a Rust crate still means *unverified*, and anything that says verified for Node now means
+  "verified on Node 22".

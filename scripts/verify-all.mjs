@@ -66,6 +66,7 @@ const SUITES = [
     cwd: "cortex-js",
     cmd: ["npm", "run", "verify"],
     deps: true,
+    needsNode: "22.6",
   },
   {
     id: "py",
@@ -81,6 +82,7 @@ const SUITES = [
     cmd: ["npm", "run", "verify"],
     deps: true,
     slow: true,
+    needsNode: "22.6",
   },
   {
     id: "desktop",
@@ -152,6 +154,15 @@ for (const suite of selected) {
     console.log(`${dim("– skip")}  ${suite.title}  ${dim(`(${suite.needs} not available)`)}`);
     if (suite.note) console.log(`         ${dim(suite.note)}`);
     continue;
+  }
+  if (suite.needsNode) {
+    const [M, N] = process.versions.node.split('.').map(Number);
+    const [rm, rn] = suite.needsNode.split('.').map(Number);
+    if (M < rm || (M === rm && N < rn)) {
+      Object.assign(record, { status: 'skip', reason: `needs Node >= ${suite.needsNode} for --experimental-strip-types (this is ${process.version})` });
+      console.log(`${dim('- skip')}  ${suite.title}  ${dim(`(Node ${process.version.slice(1)} < ${suite.needsNode})`)}`);
+      continue;
+    }
   }
   if (suite.deps && !fs.existsSync(path.join(dir, "node_modules"))) {
     if (flags.has("--install")) {

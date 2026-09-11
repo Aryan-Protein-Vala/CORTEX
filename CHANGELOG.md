@@ -36,6 +36,11 @@ launch that oversells dies in the first HN comment.
   recall, lock, forget, config), HTTP/transport failures mapped to the core's own error codes,
   `cortex:changed` / `cortex:deep-link` events, real CSP and window config, generated app icons,
   hand-written UI (`src/index.html`, `main.js`, `styles.css`) that only talks to Rust via `invoke`.
+- First real CI run (run 34584343041): fixed a dependency pin that never existed
+  (`tower = "0.7"`, now `0.4`), added the missing `security.csp` to the Tauri config, moved the
+  `sdk-js`/`frontend` CI jobs to Node 22 because `--experimental-strip-types` is not a Node 20
+  flag, and made those two `test` scripts refuse to run (with instructions) instead of dying with
+  node's exit 9. The desktop config validator now names the rule that failed.
 - Merged `main` (07a3fe4, the parallel implementation from the audit) into the working branch and
   resolved all 17 conflicts in favour of the branch's wiring; the two engine tests that asserted on
   logic copied into the test body now call `render_briefing` / `estimate_tokens` for real.

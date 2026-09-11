@@ -55,5 +55,8 @@ strip = true
 
 [dev-dependencies]
 # Drives the router in-process (no socket) for the API contract tests.
-tower = { version = "0.7", features = ["util"] }
+# 0.4, not 0.7: the 0.7 pin made `cargo generate-lockfile` fail in CI after 6s
+# (no compile) because tower never released 0.7. 0.4 is what axum 0.7 and tower-http 0.5
+# sit on, so ServiceExt::oneshot shares one tower-service 0.3 trait.
+tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"

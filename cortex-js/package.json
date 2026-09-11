@@ -39,7 +39,7 @@
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/test-client.mjs",
+    "test": "node -e \"const [M,N]=process.versions.node.split('.').map(Number);if(M<22||(M===22&&N<6)){console.error('These tests strip TypeScript at runtime and need Node >= 22.6 (found ' + process.version + '). The published package still runs on Node >= 18.17; only the test script needs the newer runtime.');process.exit(1)}\" && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/test-client.mjs",
     "check": "npm run typecheck && npm test",
     "prepublishOnly": "npm run verify",
     "verify": "npm run check && npm run build && node scripts/check-dist.mjs"

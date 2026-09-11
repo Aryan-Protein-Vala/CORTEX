@@ -186,7 +186,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: cortex-js/package-lock.json
       - run: npm ci --no-audit --no-fund
@@ -225,7 +225,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: cortex-frontend/package-lock.json
       - run: npm ci --no-audit --no-fund
@@ -278,7 +278,18 @@ jobs:
             libjavascriptcoregtk-4.1-dev libssl-dev libgtk-3-dev
       - run: cd cortex-desktop && npm ci --no-audit --no-fund
       - name: Validate tauri.conf.json
-        run: node -e "const c=require('./cortex-desktop/src-tauri/tauri.conf.json'); if(!c.security.csp) throw new Error('no CSP'); if(!c.app.windows.length) throw new Error('no window defined')"
+        # A missing key used to throw a TypeError, which read as "the validator broke"
+        # rather than "your config is wrong". Each rule now says what to fix.
+        run: |
+          node -e '
+          const c = require("./cortex-desktop/src-tauri/tauri.conf.json");
+          const fail = (m) => { console.error("tauri.conf.json: " + m); process.exit(1); };
+          const sec = c.security || {};
+          if (!sec.csp) fail("security.csp is missing; the webview can reach the core over 127.0.0.1, so it needs a policy");
+          if (!/script-src[^;]*self/.test(sec.csp)) fail("csp must pin script-src, otherwise an injected script owns the API key");
+          if (!c.app || !(c.app.windows || []).length) fail("app.windows is empty; the app would launch with no window");
+          if (c.build && c.build.devUrl) fail("devUrl is committed; the release build would load a dev server");
+          '
       # A full bundle needs Apple/Windows signing we deliberately do not fake in
       # CI, so the gate is the Rust type-check plus the config audit above.
       - name: cargo check
